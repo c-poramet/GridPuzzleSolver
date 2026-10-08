@@ -8,12 +8,19 @@ const ta = $('src'), root = $('editor'), hl = $('edHl'), bars = $('edBars'), gut
   gutter = root.querySelector('.ed-gutter'), pop = $('ac'), legend = $('legend'),
   stMode = $('stMode'), stPos = $('stPos'), stMsg = $('stMsg');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const injectedStyle = document.createElement('style');
+injectedStyle.textContent = '.ed-fixes{position:fixed;z-index:100;background:#252525;border:1px solid rgba(201,127,80,.55);border-radius:8px;padding:4px;box-shadow:0 8px 24px #000;display:flex;flex-direction:column;gap:2px}.ed-fixes button{background:none;border:0;color:#f0f0f0;padding:7px 10px;text-align:left;font:12px "Space Mono",monospace;cursor:pointer}.ed-fixes button:hover,.ed-fixes button:focus{background:rgba(201,127,80,.2);outline:0}';
+document.head.appendChild(injectedStyle);
 
 /* ───────── language data ───────── */
 const SECTION = ['SETUP', 'START', 'SOLVE'];
-const SETTINGS = ['THRESHOLD', 'LISTMAX'];
+const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT'];
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
-const RESERVED = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then'.split(' '));
+const GATES2 = ['before', 'right', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
+const PREFIX = ['each', 'exactly', 'atleast', 'atmost', 'alldiff', 'allsame', 'total', 'sum', 'avg', 'max', 'min'];
+const MODIFIERS = ['ordered', 'circular', 'unordered'];
+const SETS = ['DAYS', 'WEEKDAYS', 'MONTHS', 'SEASONS', 'ZODIAC'];
+const RESERVED = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in each exactly atleast atmost alldiff allsame total sum avg max min'.split(' '));
 const PALETTE = ['#6ca965', '#6fa3d0', '#a58bc4', '#d27d8f', '#4fb3b3', '#b8a78a'];
 const KW_COLOR = '#8fb7d4', GATE_COLOR = 'var(--clr-yellow)', SEC_COLOR = 'var(--accent)';
 const MODE_NAME = ['—', 'SETUP', 'START', 'SOLVE'];
@@ -38,7 +45,7 @@ function numericVals(tokens, N) {
   return { vals: a, labels: a.map(fmtNum) };
 }
 
-const LEX = /(\s+)|(<=>|=>|!=|[=<>+\-])|([()])|([tT][hH][eE][nN]\+)|(\.\.\.)|(\d*\?)|([A-Za-z0-9_.]+)|(.)/g;
+const LEX = /(\s+)|(<=>|=>|!=|<=|>=|[=<>+\-*\/~])|([(){}\[\],:])|([tT][hH][eE][nN]\+)|(\.\.\.?|\.\.)|(\d*\?)|("(?:\\"|[^"])*"|'s\b|\.?[A-Za-z_][A-Za-z0-9_.']*|\.?\d+(?:\.\d+)?)|(.)/g;
 function lex(code) {
   const out = []; let m; LEX.lastIndex = 0;
   while ((m = LEX.exec(code))) {
@@ -63,10 +70,10 @@ function analyze(text) {
     if (u === 'START') { mode = 2; L.kind = 'sec'; L.mode = 2; return; }
     if (u === 'SOLVE') { mode = 3; L.kind = 'sec'; L.mode = 3; return; }
     L.mode = mode;
-    if (/^(THRESHOLD|LISTMAX)\s*=\s*\d+$/i.test(code)) { L.kind = 'set'; return; }
+    if (/^(THRESHOLD|LISTMAX)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
     if (mode === 0) { L.kind = 'stray'; return; }
     if (mode === 1) {
-      const m = code.match(/^(\S+)\s*\[([^\]]*)\]\s*(.*)$/);
+      const m = code.match(/^(\S+)\s*(?:\[([^\]]*)\])?\s*(.*)$/);
       if (!m) { L.kind = 'catbad'; return; }
       const cat = { name: m[1], tag: m[2], tokens: m[3].split(/\s+/).filter(Boolean), line: i, color: PALETTE[cats.length % PALETTE.length] };
       cats.push(cat); L.kind = 'cat'; L.cat = cat; return;
@@ -80,14 +87,29 @@ function analyze(text) {
     const nv = numericVals(c.tokens, N);
     if (nv) { c.num = true; c.vals = nv.vals; c.valSet = new Set(nv.vals); c.items = nv.labels; }
     else { c.num = false; c.items = c.tokens.filter(x => x !== '...'); }
-    c.validTag = /^[a-z]$/.test(c.tag);
+    c.validTag = /^[a-z]+$/.test(c.tag);
   });
   const tagMap = new Map();
-  cats.forEach(c => { if (c.validTag && !tagMap.has(c.tag)) tagMap.set(c.tag, c); });
+  const reserved = new Set(cats.filter(c => c.validTag).map(c => c.tag));
+  cats.forEach(c => {
+    if (!c.tag) {
+      const base = c.name.toLowerCase().replace(/[^a-z]/g, '') || 'a';
+      for (let n = 1; n <= base.length; n++) {
+        const candidate = base.slice(0, n);
+        if (!reserved.has(candidate) && !cats.some(x => x !== c && x.name.toLowerCase() === candidate)) { c.tag = candidate; c.autoTag = true; reserved.add(candidate); break; }
+      }
+    }
+    c.validTag = /^[a-z]+$/.test(c.tag);
+    if (c.validTag && !tagMap.has(c.tag)) tagMap.set(c.tag, c);
+  });
 
   // pass 2: tokens + lint
   const tk = (L, s, t, cls, extra) => { if (t !== '') L.toks.push(Object.assign({ s, t, cls: cls || '' }, extra)); };
-  const bad = (L, s, t, msg, cls, extra) => { tk(L, s, t, cls, Object.assign({ bad: true }, extra)); L.issues.push({ s, e: s + t.length, msg }); };
+  const bad = (L, s, t, msg, cls, extra) => {
+    const meta = Object.assign({ bad: true }, extra);
+    tk(L, s, t, cls, meta);
+    L.issues.push({ s, e: s + t.length, msg, fixes: meta.fixes || [] });
+  };
 
   raw.forEach((l, i) => {
     const L = lines[i], ci = l.indexOf('//'), code = ci < 0 ? l : l.slice(0, ci);
@@ -99,13 +121,14 @@ function analyze(text) {
       case 'stray': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Begin with SETUP', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'catbad': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Expected: name [tag] items…', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'set': {
-        const m = code.match(/^(\s*)(\S+?)(\s*)(=)(\s*)(\d+)(\s*)$/);
+        const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
         let p = 0;
         [[m[1], ''], [m[2], 't-set'], [m[3], ''], [m[4], 't-op'], [m[5], ''], [m[6], 't-num'], [m[7], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
         break;
       }
       case 'cat': {
-        const c = L.cat, m = code.match(/^(\s*)(\S+)(\s*)\[([^\]]*)\](\s*)(.*)$/);
+        const c = L.cat, m = code.match(/^(\s*)(\S+)(?:\s*\[([^\]]*)\])?(\s*)(.*)$/);
+        if (!m) { bad(L, 0, code, 'Expected: name [tag] items…', 't-id'); break; }
         const style = '--c:' + c.color;
         let p = 0;
         tk(L, p, m[1], ''); p += m[1].length;
@@ -115,22 +138,22 @@ function analyze(text) {
         else if (N && !c.tokens.includes('...') && c.tokens.length !== N) nameProblems.push(`"${c.name}" has ${c.tokens.length} items but the grid size is ${N}`);
         if (nameProblems.length) bad(L, p, m[2], nameProblems[0], 't-cname', { style }); else tk(L, p, m[2], 't-cname', { style });
         p += m[2].length;
-        tk(L, p, m[3], ''); p += m[3].length;
-        tk(L, p, '[', 't-br', { br: true }); p++;
-        const tagBad = !c.validTag ? `Tag [${c.tag}] must be exactly one lowercase letter` : tagMap.get(c.tag) !== c ? `Tag [${c.tag}] is already used` : '';
-        if (tagBad) bad(L, p, m[4], tagBad, 't-tagdef', { style }); else tk(L, p, m[4], 't-tagdef', { style });
-        p += m[4].length;
-        tk(L, p, ']', 't-br', { br: true }); p++;
-        tk(L, p, m[5], ''); p += m[5].length;
-        const rest = m[6], seen = new Set();
+        tk(L, p, m[4] || '', ''); p += (m[4] || '').length;
+        if (m[3] != null) {
+          tk(L, p, '[', 't-br', { br: true }); p++;
+          const tagBad = !c.validTag ? `Tag [${c.tag}] must be one or more lowercase letters` : tagMap.get(c.tag) !== c ? `Tag [${c.tag}] is already used` : '';
+          if (tagBad) bad(L, p, m[3], tagBad, 't-tagdef', { style }); else tk(L, p, m[3], 't-tagdef', { style });
+          p += m[3].length; tk(L, p, ']', 't-br', { br: true }); p++;
+        }
+        const rest = m[5], seen = new Set();
         let last = 0, r; const re = /\S+/g;
         while ((r = re.exec(rest))) {
           tk(L, p + last, rest.slice(last, r.index), ''); last = r.index + r[0].length;
           const w = r[0], at = p + r.index;
-          if (w === '...') { if (!c.num) bad(L, at, w, '"..." only works with numbers', 't-dots'); else tk(L, at, w, 't-dots'); continue; }
+          if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step)$/i.test(w)) { tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw'); continue; }
           let msg = '';
           if (!c.num) {
-            if (!/^[A-Za-z0-9_]+$/.test(w) || /^[a-z]$/.test(w)) msg = `Bad item name "${w}" (letters/digits only, not a single lowercase letter)`;
+            if (!/^(?:"(?:\\"|[^"])*"|[A-Za-z][A-Za-z0-9_]*|[-+]?\d+(?:\.\d+)?)$/.test(w)) msg = `Bad item name "${w}"`;
             else if (RESERVED.has(w.toLowerCase())) msg = `"${w}" is a reserved word`;
             else if (seen.has(w)) msg = `Duplicate item "${w}"`;
             seen.add(w);
@@ -156,6 +179,7 @@ function analyze(text) {
           }
           const w = t.t, lw = w.toLowerCase();
           if (GATES.includes(lw) || lw === 'not') { tk(L, t.s, w, 't-gate'); return; }
+          if (GATES2.includes(lw) || PREFIX.includes(lw) || MODIFIERS.includes(lw) || SETS.includes(w.toUpperCase()) || ['step', 'default', 'unit'].includes(lw)) { tk(L, t.s, w, 't-kw'); return; }
           if (lw === 'then') { tk(L, t.s, w, 't-kw'); return; }
           if (lw === 'of') {
             const p = t.prev;
@@ -176,19 +200,23 @@ function analyze(text) {
             return;
           }
           if (!have) { tk(L, t.s, w, 't-id'); return; }
-          if (/^[a-z]$/.test(w)) {
-            const c = tagMap.get(w);
+          if (/^[a-z]+$/.test(w)) {
+            const c = tagMap.get(w) || cats.find(x => x.name.toLowerCase() === lw);
             if (!c) bad(L, t.s, w, `Unknown tag "${w}"`, 't-id');
             else if (!t.next || t.next.t.toLowerCase() !== 'of') bad(L, t.s, w, `Tag "${w}" alone means a category; use "${w} of X"`, 't-tag', { style: '--c:' + c.color });
             else tk(L, t.s, w, 't-tag', { style: '--c:' + c.color });
             return;
           }
-          const tag = w.slice(-1), name = w.slice(0, -1), c = tagMap.get(tag);
-          if (c && !c.num && c.items.includes(name)) { tk(L, t.s, w, 't-ent', { style: '--c:' + c.color, parts: [name, tag] }); return; }
-          const hit = cats.find(x => !x.num && x.validTag && x.items.includes(w));
-          if (hit) bad(L, t.s, w, `"${w}" is missing its tag. Did you mean "${w}${hit.tag}"?`, 't-id');
-          else if (!c) bad(L, t.s, w, `Unknown word "${w}" (tag "${tag}" is not declared)`, 't-id');
-          else bad(L, t.s, w, `"${name}" is not an item of ${c.name} [${tag}]. Options: ${c.items.join(', ')}`, 't-id');
+          const bare = cats.filter(x => x.items.some(it => String(it).toLowerCase() === lw || String(it).split('/').some(a => a.toLowerCase() === lw)));
+          const suffix = cats.filter(x => x.validTag && x.items.some(it => String(it).toLowerCase() === w.slice(0, -x.tag.length).toLowerCase()) && w.toLowerCase().endsWith(x.tag));
+          const matches = [...new Map([...bare, ...suffix].map(x => [x.name.toLowerCase(), x])).values()];
+          if (matches.length === 1) tk(L, t.s, w, 't-ent', { style: '--c:' + matches[0].color });
+          else if (matches.length > 1) bad(L, t.s, w, `Ambiguous "${w}": ${matches.map(x => `${x.name} [${x.tag || 'untagged'}]`).join(', ')}`, 't-id');
+          else {
+            const suggestions = cats.flatMap(x => x.items.filter(it => String(it).toLowerCase().startsWith(lw.slice(0, 2))).slice(0, 3)
+              .map(it => ({ label: `Use ${it}${x.tag}`, edits: [{ line: i + 1, start: t.s + 1, end: t.s + w.length, text: String(it) + x.tag }] })));
+            bad(L, t.s, w, `Unknown word "${w}"`, 't-id', { fixes: suggestions });
+          }
         });
         break;
       }
@@ -399,6 +427,43 @@ function dupLines(dir) {
   if (dir > 0) ta.setSelectionRange(a + block.length + 1, b + block.length + 1); else ta.setSelectionRange(a, b);
 }
 
+/* Conservative text-only normalizer. It deliberately leaves constructs that
+   the installed solver cannot parse untouched. */
+function normalizeLines() {
+  const { s, e } = lineRange(), source = ta.value.slice(s, e);
+  const out = source.split('\n').map(line => line
+    .replace(/(?<!\.)\.\.(?!\.)/g, '...')
+    .replace(/\badj\b/gi, 'beside')
+    .replace(/\bUNIT\s*=/gi, 'DEFAULT UNIT =')
+    .replace(/\s+~/g, ' apart')
+  ).join('\n');
+  if (out === source) { stMsg.textContent = 'Already in canonical form'; return; }
+  replace(s, e, out);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  stMsg.textContent = 'Normalized selected lines · edited';
+}
+
+const fixPop = document.createElement('div');
+fixPop.className = 'ed-fixes';
+fixPop.hidden = true;
+document.body.appendChild(fixPop);
+function closeFixes() { fixPop.hidden = true; }
+function showFixes() {
+  const c = caret(), L = A.lines[c.line], issue = L && (L.issues.find(x => c.col >= x.s && c.col <= x.e) || L.issues[0]);
+  if (!issue || !issue.fixes || !issue.fixes.length) return;
+  fixPop.innerHTML = issue.fixes.map((f, i) => `<button type="button" data-fix="${i}">💡 ${esc(f.label)}</button>`).join('');
+  const r = ta.getBoundingClientRect(); fixPop.style.left = `${r.left + 24}px`; fixPop.style.top = `${r.top + (c.line + 1) * lh}px`; fixPop.hidden = false;
+  fixPop.querySelector('button')?.focus();
+}
+fixPop.addEventListener('click', e => {
+  const b = e.target.closest('[data-fix]'), c = caret(), L = A.lines[c.line], issue = L && (L.issues.find(x => c.col >= x.s && c.col <= x.e) || L.issues[0]);
+  const f = issue?.fixes?.[+b?.dataset.fix]; if (!f) return;
+  const edits = (f.edits || []).slice().sort((a, b) => b.line - a.line || b.start - a.start);
+  const lines = ta.value.split('\n');
+  edits.forEach(x => { const i = x.line - 1, line = lines[i] || ''; lines[i] = line.slice(0, x.start - 1) + x.text + line.slice(x.end); });
+  replace(0, ta.value.length, lines.join('\n')); closeFixes(); refresh(); stMsg.textContent = 'Quick fix applied · edited';
+});
+
 /* ───────── autocomplete ───────── */
 const ac = { open: false, items: [], sel: 0, from: 0, to: 0, prefix: '', kind: '', numeric: false, navigated: false };
 
@@ -413,7 +478,11 @@ function entityItems() {
   const out = [];
   A.cats.forEach(c => {
     if (!c.validTag || A.tagMap.get(c.tag) !== c) return;
-    c.items.forEach(it => out.push({ label: it + c.tag, tagged: true, color: c.color, detail: `${c.name} [${c.tag}]` }));
+    c.items.forEach(it => {
+      const name = String(it), display = /[^A-Za-z0-9_]/.test(name) ? `"${name.replace(/"/g, '\\"')}"` : name;
+      out.push({ label: display, insert: display, color: c.color, detail: `${c.name} [${c.tag}]` });
+      out.push({ label: name + c.tag, tagged: true, color: c.color, detail: `${c.name} [${c.tag}] · tagged` });
+    });
   });
   return out;
 }
@@ -574,6 +643,8 @@ const PAIRS = { '(': ')', '[': ']' };
 ta.addEventListener('keydown', e => {
   if (e.isComposing) return;
   const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.altKey && e.code === 'KeyN') { e.preventDefault(); normalizeLines(); return; }
+  if (mod && e.key === '.') { e.preventDefault(); showFixes(); return; }
   if (ac.open) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); return; }
     if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); accept(ac.sel); return; }
@@ -643,10 +714,16 @@ gutter.addEventListener('wheel', e => { ta.scrollTop += e.deltaY; e.preventDefau
 
 // shortcuts popover + copy
 const kbBtn = $('kbBtn'), kbPop = $('kbPop');
+const normBtn = document.createElement('button');
+normBtn.type = 'button'; normBtn.className = 'title-link'; normBtn.textContent = 'Normalize';
+normBtn.title = 'Normalize selected lines (Ctrl/⌘ Alt N)';
+document.querySelector('.panel-tools')?.prepend(normBtn);
+normBtn.addEventListener('click', normalizeLines);
 const kbSet = on => { kbPop.hidden = !on; kbBtn.setAttribute('aria-expanded', String(on)); };
 kbBtn.addEventListener('click', e => { e.stopPropagation(); kbSet(kbPop.hidden); });
 document.addEventListener('click', e => { if (!kbPop.hidden && !kbPop.contains(e.target)) kbSet(false); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') kbSet(false); });
+document.addEventListener('mousedown', e => { if (!fixPop.contains(e.target) && e.target !== ta) closeFixes(); });
 const cp = $('cp');
 if (cp) cp.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); document.execCommand('copy'); }
