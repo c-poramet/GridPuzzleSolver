@@ -189,13 +189,14 @@ function analyze(text) {
           }
           if (RESERVED.has(lw)) { bad(L, t.s, w, `Unexpected "${w}" here. Statements joined by gates need parentheses`, 't-id'); return; }
           if (/^\d/.test(w)) {
-            const m = w.match(/^(\d+(?:\.\d+)?)([a-z])?$/);
+            const m = w.match(/^(\d+(?:\.\d+)?)([a-z]+)?$/);
             if (!m) { bad(L, t.s, w, `Bad number "${w}"`, 't-num'); return; }
             if (!m[2]) { tk(L, t.s, w, 't-num'); return; }
             if (!have) { tk(L, t.s, w, 't-num'); return; }
             const c = tagMap.get(m[2]);
-            if (!c || !c.num) { bad(L, t.s, w, `"${m[2]}" is not a numeric tag`, 't-num'); return; }
-            if (!c.valSet.has(+m[1])) { bad(L, t.s, w, `${m[1]} is not a value of ${c.name} (${c.items.join(', ')})`, 't-num'); return; }
+            if (!c || (!c.num && !c.ordered)) { bad(L, t.s, w, `"${m[2]}" is not an order-capable tag`, 't-num'); return; }
+            const valid = c.num ? c.valSet.has(+m[1]) : Number.isInteger(+m[1]) && +m[1] >= 1 && +m[1] <= c.items.length;
+            if (!valid) { bad(L, t.s, w, `${m[1]} is not a value of ${c.name} (${c.items.join(', ')})`, 't-num'); return; }
             tk(L, t.s, w, 't-ent', { style: '--c:' + c.color, parts: [m[1], m[2]] });
             return;
           }
