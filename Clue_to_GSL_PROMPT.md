@@ -21,45 +21,51 @@ LISTMAX = n       (optional, default 10: list possibilities when <= n remain)
 SOLVE             (optional; everything after it is ignored)
 THRESHOLD / LISTMAX may appear on any line before SOLVE. Comments start with //.
 Blank lines are fine. SETUP / START / SOLVE / THRESHOLD / LISTMAX and all keywords
-(and, or, then, of, ...) are case-insensitive; item names and tags are case-sensitive.
+(and, or, then, of, ...) are case-insensitive; item names, aliases, and category
+names match case-insensitively while declared spelling is preserved; tags remain
+lowercase and case-sensitive.
 Once the clues give a result the site also shows an answer table, so no extra output
 is needed.
 
 # SETUP RULES
-- Category name: ONE word (no spaces), not a reserved word (list below).
-- Tag: exactly ONE lowercase letter, unique per category, mnemonic (genes [g],
-  riders [r], color [c]). Tags double as units for numbers (500g). Max 26 categories.
+- Category name: one unquoted word, or a quoted name when needed; it must not be
+  a reserved word.
+- Tag: optional, unique, and one or more lowercase letters (genes [g], color [c],
+  order [o]). Missing tags receive the shortest available category-name prefix
+  after explicit tags are reserved. Tags double as units for numbers (`500g`,
+  `10o`). There is no fixed 26-category limit.
 - Every category has the same number of items (N), at most 12. At least one category
   must list all its items; N comes from those.
-- Item names: letters/digits/underscore only, starting with a letter; no spaces or
-  punctuation ("Dr. Walsh" becomes Walsh). Not a single lowercase letter. Not a
-  reserved word: setup start solve threshold listmax proceed of and or xor not nand
-  nor xnor then after (checked case-insensitively). Initials are allowed (B D E L) but
-  must be unique in a category; if two share an initial use the shortest unique
-  prefix (Abc, Acb).
+- Item names are case-insensitive for matching and preserve their declared
+  spelling in output. Use quotes for spaces or punctuation (`"Dr. Walsh"`);
+  aliases use slash syntax (`Alexander/Al/Alex`). Single lowercase-letter items
+  are allowed. Avoid reserved words unless the name is quoted.
 - Numeric category: all items are numbers. Shorthand with "...":
     250 500 ...      continue the step until N items (250 500 750 1000); needs 2+ values
     ... 750 1000     fill backwards; needs 2+ values
     250 ... 1000     evenly spaced between
   Only one "..." per line, and it must expand to exactly N values. A category that
   uses "..." cannot be the one that sets N. Irregular values: list every value.
-  Decimals fine, negatives not.
+  Decimals and negative values are supported.
 - Anything compared by size or ordered by "then"/"after" (dates, ranks, months, floors)
-  must be a numeric category (1 2 3 ...). If only equality is used, names are fine.
+  must be numeric or explicitly `ordered`. Predefined sets and named ranges are
+  ordered automatically; `circular` implies `ordered`.
 - Keep puzzles reasonable: typical sizes are 3-6 categories of 4-8 items. Very large
   grids still run but the solver may show estimates instead of exact counts.
 
-# REFERENCING THINGS (case-sensitive)
+# REFERENCING THINGS
 | Written | Meaning |
 |---|---|
 | Wd | item W of the category tagged d: item name + tag (last char is the tag) |
-| 1000g | the item of numeric category g whose value is 1000 (must exist) |
+| 1000g | the item/value in unit `g` whose value or position is 1000 |
 | 5 or 5.5 | a plain number (only for arithmetic or numeric comparison) |
 | b of Id | the b-entity belonging to Id ("the bacteria sequenced by Dr. Ingram"). Needs an entity or number+tag after "of" |
 | g of Id | same idea with a numeric tag: the genes value of Id. It also fixes the unit to g |
-Tag is ALWAYS required: write Acbb, never Acb. "tag of X" is just another name for X's
-row; it never changes which item is meant, it only documents it (and sets the unit
-when the tag is numeric).
+Tags are optional for entities: `Ann` works when it resolves uniquely, while
+legacy glued forms such as `Annf` remain valid. Use `Red.c`, `Redc`, or a quote
+when the same name occurs in multiple categories. A number-plus-tag is glued
+(`5o`, `1h`, `10o`), and `tag of X` is the explicit long form that also sets
+the unit.
 
 # GRAMMAR (lowest to highest precedence)
 clue       := chain [ ("=>" | "<=>") chain ]
@@ -99,7 +105,7 @@ comparisons in a row without parentheses.
   sides) means {A,B} equals {C,D} in some order. A space between values means
   "and", so "A B = C D" is identical and shorter (prefer it).
 
-# ORDER ("then" / "after") - numeric order, ascending by the numeric category's value
+# ORDER ("then" / "after") - numeric or ordered positions
 Positions are SLOTS in the sorted order of the numeric category, not value differences:
 with values 250 500 750 1000, "next slot" means +250 only because they are evenly spaced.
 - "A then B": B is IMMEDIATELY after A (next slot up).
@@ -125,9 +131,9 @@ with values 250 500 750 1000, "next slot" means +250 only because they are evenl
     A B then ?             the later of A and B is not the last slot
     ? then A B             the earlier of A and B is not the first slot
     A B then C             C is right after whichever of A, B is later
-- Order category: the only numeric category, else the unit of any number+tag or
-  "g of X" in the clue (e.g. "Id then 1000g", "g of Id then Eb"). If several numeric
-  categories exist, include one such literal.
+- Order category: an explicit number-plus-tag (`1h`, `10o`), an entity in an
+  ordered category, `DEFAULT UNIT = tag`, or the sole order-capable category.
+  If several candidates remain, use the tag or category name explicitly.
 - No arithmetic and no bare numbers inside order chains: slots must be entities,
   number+tag values, or "g of X".
 - No gate words inside a chain. Combine order statements with gates only via
@@ -174,16 +180,19 @@ Choose xor for "either...or"; use or for plain "or" or "at least one".
 Rule of thumb: values with real quantities use + - < >; position/sequence wording
 ("next", "right after", "with one between") uses then / after.
 
-# NOT SUPPORTED (state it in Notes, offer an escape hatch)
-- Multiplication, division, ratios, modulo, the tokens <= and >= (use the "not"
-  recipes above), unary minus / negative numbers in clues, arithmetic inside
-  then/after chains, more than 12 items per category.
-- Ordering non-numeric items (give them numeric items instead).
+# LIMITS AND CURRENTLY UNSUPPORTED FOR TRANSLATION
+- More than 12 items in one category.
+- Arithmetic expressions inside `then`/`after` chains.
+- If a requested construct is not listed in this prompt, say so in Notes rather
+  than inventing syntax. The solver also supports `<=`, `>=`, `*`, `/`, unary
+  minus, distance (`apart`/`~`), counting, ranges, aliases, and ordered
+  categories; use them when they directly match the clue.
 Escape hatch: list valid value pairs with parenthesized gates, e.g.
   twice as many: ((A = 4r) and (B = 2r)) or ((A = 8r) and (B = 4r))
 
 # VALIDATION CHECKLIST (run before answering)
-1. Tags unique, one lowercase letter; every entity ends with its tag.
+1. Tags unique, lowercase, and one or more letters; use tagless entities when
+   resolution is unique and glued number-plus-tag forms for units.
 2. No item or category name is reserved (including "then" and "after"), a single
    lowercase letter, or duplicate; category names have no spaces.
 3. Equal item counts (max 12); numeric "..." expands to exactly N values.
@@ -194,8 +203,8 @@ Escape hatch: list valid value pairs with parenthesized gates, e.g.
    mixed gates in one list or chain.
 8. Every then/after chain uses entities (not arithmetic), has something on both sides,
    uses one direction only, and contains no gate words.
-9. With several numeric categories, every arithmetic/order clue names its unit
-   (500g, g of X).
+9. With several numeric or ordered categories, every arithmetic/order clue names
+   its unit (`500g`, `10o`, `g of X`, or `DEFAULT UNIT = g`).
 10. Ambiguity: pick the standard puzzle reading, translate it, list the alternative in
     Notes. Never silently drop a clue.
 
@@ -221,6 +230,35 @@ b of Id - 250g = b of Od
 Wd = 1000g xor Eb
 Id then Eb
 Db then ? then Od
+SOLVE
+
+Puzzle: five houses with colors, nations, drinks, cigars, and pets.
+Use this as a reference for explicit tags, numeric position units, and
+parenthesized adjacency alternatives:
+->
+SETUP
+house [h] 1 2 ...
+color [c] Red Green White Yellow Blue
+nation [n] British Swedish Dane Norwegian German
+drink [d] Tea Coffee Milk Beer Water
+cigar [s] Dunhill PallMall Blends Bluemasters Prince
+pet [p] Dog Bird Cat Horse Fish
+START
+Britishn = Redc
+Swedishn = Dogp
+Danen = Tead
+Greenc then Whitec
+Greenc = Coffeed
+PallMalls = Birdp
+Yellowc = Dunhills
+Milkd = 3h
+Norwegiann = 1h
+(Blendss then Catp) or (Catp then Blendss)
+(Horsep then Dunhills) or (Dunhills then Horsep)
+Bluemasterss = Beerd
+Germann = Princes
+(Norwegiann then Bluec) or (Bluec then Norwegiann)
+(Blendss then Waterd) or (Waterd then Blendss)
 SOLVE
 
 Puzzle: Ann, Bob and Cy each adopt a different pet (cat, dog, fish) on days 1, 2, 3.

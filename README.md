@@ -41,6 +41,44 @@ Cyf = Dogp
 
 Both programs produce the same 36 → 18 → 6 → 3 → 1 steps. `SOLVE` is an optional end marker.
 
+### A larger worked example
+
+This classic six-category puzzle demonstrates a declared numeric unit, glued
+number-plus-tag references such as `3h`, `1h`, and `10o`, and order clues with
+parenthesized alternatives:
+
+```
+SETUP
+house [h] 1 2 ...
+color [c] Red Green White Yellow Blue
+nation [n] British Swedish Dane Norwegian German
+drink [d] Tea Coffee Milk Beer Water
+cigar [s] Dunhill PallMall Blends Bluemasters Prince
+pet [p] Dog Bird Cat Horse Fish
+
+START
+Britishn = Redc
+Swedishn = Dogp
+Danen = Tead
+Greenc then Whitec
+Greenc = Coffeed
+PallMalls = Birdp
+Yellowc = Dunhills
+Milkd = 3h
+Norwegiann = 1h
+(Blendss then Catp) or (Catp then Blendss)
+(Horsep then Dunhills) or (Dunhills then Horsep)
+Bluemasterss = Beerd
+Germann = Princes
+(Norwegiann then Bluec) or (Bluec then Norwegiann)
+(Blendss then Waterd) or (Waterd then Blendss)
+SOLVE
+```
+
+`3h`, `1h`, and `10o` mean a value or position in the category tagged `h` or
+`o`. The suffix may contain multiple lowercase letters; it is not the same as
+writing a bare category tag such as `o`, which is reserved for `o of X`.
+
 ## Cheat sheet: say it → write it
 
 | In words | Short | Long |
@@ -91,7 +129,12 @@ Use quotes for spaces and punctuation: `"Mrs Brown"`. Slash-separated aliases di
 
 ### Units and references
 
-A numeric or ordered category is a unit. Units are inferred from an explicit suffix, an operand, `DEFAULT UNIT`, or the sole order-capable category. With several candidates the diagnostic says `Which unit?` and offers fixes. `X.cat`, `X's cat`, and `cat of X` are equivalent and chainable. `X.own_category` selects X itself.
+A numeric or ordered category is a unit. Units are inferred from an explicit
+suffix, an operand, `DEFAULT UNIT`, or the sole order-capable category. A
+number may be glued to a one-or-more-letter unit tag: `5o`, `1h`, `10o`,
+`2.5kg`. With several candidates the diagnostic says `Which unit?` and offers
+fixes. `X.cat`, `X's cat`, and `cat of X` are equivalent and chainable.
+`X.own_category` selects X itself.
 
 ### Operators, order and position
 
@@ -147,7 +190,9 @@ Every diagnostic includes its source line. Solver errors remain authoritative; t
 
 ## Limits and files
 
-Each category has at most 12 items. Large grids may show estimates. There is no build step or dependency.
+Each category has at most 12 items. There is no fixed 26-category limit;
+performance is the practical constraint. Large grids may show estimates. There
+is no build step or dependency.
 
 | File | Purpose |
 |---|---|
