@@ -254,7 +254,7 @@ SOLVE`;
 
 function run(force) {
   const out = $('out');
-  let thr = 1, lm = 50;
+  let thr = 1, lm = 10;
   window.GSEditor?.setError(null);
   try {
     const L = [];
