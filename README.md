@@ -8,7 +8,7 @@ Keep `index.html`, `styles.css`, `editor.js` and `solver.js` in one folder and o
 
 ## How it works
 
-Type the puzzle on the left. The right side **updates live**: after `START`, and after every clue line you finish with Enter (the line you're still typing is ignored). Press **Update now** or `Ctrl+Enter` to force a run. Grids above 400,000 combinations pause auto-update; the button still works (hard limit 4,000,000).
+Type the puzzle on the left, then press **Update now** or `Ctrl+Enter`. Nothing updates automatically: typing never re-runs the solver (the badge in the header shows `edited` until you update), and the page does not solve on load. Grids are limited to 4,000,000 combinations.
 
 For every clue you see the number of possibilities left, how many it removed, newly certain facts, and the possibilities themselves when few remain. Hover a step to highlight its clue in the editor; click it to jump there.
 

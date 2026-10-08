@@ -336,7 +336,7 @@ const placeCol = (k, target, after) => {
 };
 
 /* ───────── run ───────── */
-function run(force) {
+function run() { // only ever called by the Update button, Ctrl+Enter, Example and Clear
   const out = $('out');
   let thr = DEF_THR, lm = DEF_LM;
   ans = null;
@@ -345,7 +345,6 @@ function run(force) {
     const L = [];
     const txt = $('src').value, raw = txt.split('\n');
     if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
-    if (!force && !txt.endsWith('\n')) raw.pop(); // live mode waits for Enter
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
     let mode = 0, setup = [], clues = [], done = false;
     for (const x of L) {
@@ -358,11 +357,9 @@ function run(force) {
       if (mode === 1) setup.push(x); else if (mode === 2) clues.push(x); else throw new E('Begin with SETUP', x.n);
     }
     setTags(thr, lm);
-    if (mode < 2) { if (force) throw new E('Missing START'); return; }
+    if (mode < 2) throw new E('Missing START');
     if (!setup.length) throw new E('Missing SETUP section');
     const C = parseSetup(setup);
-    let nf = 1; for (let i = 2; i <= C[0].items.length; i++) nf *= i;
-    if (!force && clues.length && Math.pow(nf, C.length - 1) > 4e5) { out.innerHTML = '<div class="warn-banner">Large grid: auto-update paused. Press Update now (Ctrl+Enter).</div>'; return; }
     const fns = clues.map(c => compileClue(c.t, C, c.n));
     const R = solve(C, fns, lm);
     const nm = (c, i) => C[c].items[i] + C[c].tag, N = C[0].items.length;
@@ -408,12 +405,13 @@ const ED = window.GSEditor;
 const setText = (v, top) => { if (ED) ED.setText(v, top); else $('src').value = v; store.set($('src').value); };
 $('src').value = store.get() ?? EX; // last input is restored; first visit gets the example
 ED?.refresh();
-$('run').onclick = () => run(true);
-let tm; $('src').addEventListener('input', () => { store.set($('src').value); clearTimeout(tm); tm = setTimeout(() => run(false), 250); });
+$('run').onclick = () => run();
+// no auto-update: typing only saves the text and marks the result as out of date
+$('src').addEventListener('input', () => { store.set($('src').value); if ($('src').value.trim()) $('badge').textContent = 'edited'; });
 addEventListener('pagehide', () => store.set($('src').value));
-$('ex').onclick = () => { setText(EX, true); run(true); };
-$('clr').onclick = () => { setText('', true); run(true); };
-$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(true); });
+$('ex').onclick = () => { setText(EX, true); run(); };
+$('clr').onclick = () => { setText('', true); run(); };
+$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(); });
 
 // steps <-> editor: hover previews the clue line, click jumps to it
 const outEl = $('out');
@@ -504,4 +502,4 @@ split.addEventListener('keydown', e => {
 addEventListener('resize', () => applySplit(false));
 applySplit(false);
 
-run(true);
+if ($('src').value.trim()) $('badge').textContent = 'not updated'; // nothing runs until you press Update now

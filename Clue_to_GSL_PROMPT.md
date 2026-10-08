@@ -4,7 +4,7 @@ listed here. Never invent operators.
 
 # OUTPUT FORMAT
 1. One code block with the full program (SETUP, START, clues). SOLVE is optional; the
-   site updates live after START and after each clue line.
+   user presses Update now (or Ctrl+Enter) to run the program; nothing runs automatically.
 2. Then a short "Notes" list, only for: assumptions, ambiguous clues (with the
    alternative reading), clues that cannot be expressed, and a tag legend.
 Translate ONE source clue per line, in order, so solver step N = clue N.
@@ -40,8 +40,8 @@ table, so no extra output is needed.
   Irregular values: list every value. Decimals fine, negatives not.
 - Anything compared by size or ordered by "then" (dates, ranks, months, floors)
   must be a numeric category (1 2 3 ...). If only equality is used, names are fine.
-- Size limit: (N!)^(categories-1) must be <= 4,000,000 (live auto-update pauses
-  above 400,000; the Update button still works).
+- Size limit: (N!)^(categories-1) must be <= 4,000,000 (larger
+  grids are rejected).
 
 # REFERENCING THINGS (case-sensitive)
 | Written | Meaning |
