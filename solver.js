@@ -68,6 +68,8 @@ const imp3 = (a, b) => (a === false || b === true) ? true : (a === true && b ===
 const iff3 = (a, b) => (a === null || b === null) ? null : a === b;
 const lone = m => (m & (m - 1)) === 0;                                   // at most one bit set
 const pop = m => { let c = 0; while (m) { m &= m - 1; c++; } return c; };
+const lowBit = m => 31 - Math.clz32(m & -m);                             // index of the lowest set bit
+const highBit = m => 31 - Math.clz32(m);                                 // index of the highest set bit
 const rowEq = (ra, rb) => (ra & rb) === 0 ? false : (ra === rb && lone(ra) ? true : null);
 const cmpNum = (A, B, op) => {
   let t = false, f = false;
@@ -82,7 +84,7 @@ const comb = (A, B, plus) => { const s = new Set(); for (const a of A) for (cons
 
 /* ───────── plain-language helpers (used for the tooltips) ───────── */
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
-const slots = n => n === 1 ? 'slot' : 'slots';
+const places = n => n === 1 ? 'position' : 'positions';
 const REL = { '=': ['goes with', 'equals'], '!=': ['does not go with', 'does not equal'], '<': ['is less than', 'is less than'], '>': ['is more than', 'is more than'] };
 const listAnd = xs => xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
 const quant = (g, xs) => {
@@ -224,7 +226,7 @@ function compileClue(text, C, ln) {
       const exists = (v, ok) => { const rec = (i, used) => i === m || v[i].some((x, k) => !(used >> k & 1) && ok(x) && rec(i + 1, used | 1 << k)); return rec(0, 0); };
       return {
         f: D => { const v = fn.map(r => r.map(g => g(D))); return !exists(v, x => x !== false) ? false : exists(v, x => x === true) ? true : null; },
-        say: `${listAnd(L.terms.map(t => t.say))} are matched one-to-one with ${listAnd(R.terms.map(t => t.say))}, in either order`
+        say: `${listAnd(L.terms.map(t => t.say))} are paired up with ${listAnd(R.terms.map(t => t.say))}, one each, in either order`
       };
     }
     const lst = m > 1, j = lst ? L.j : R.j, one = lst ? R.terms[0] : L.terms[0];
@@ -237,7 +239,7 @@ function compileClue(text, C, ln) {
     const gq = op === '!=' ? 'nor' : j, rop = op === '!=' ? '=' : lst ? (flip[op] || op) : op;
     const subj = lst ? infos[0].sb : infos[0].sa, its = infos.map(i => lst ? i.sa : i.sb);
     const say = (gq === 'nand' || gq === 'xnor')
-      ? gateText(gq, infos.map(i => `${i.sa} ${REL[op][i.numeric ? 1 : 0]} ${i.sb}`))
+      ? cap(gateText(gq, infos.map(i => `${i.sa} ${REL[op][i.numeric ? 1 : 0]} ${i.sb}`)))
       : `${subj} ${REL[rop][num ? 1 : 0]} ${quant(gq, its)}`;
     return { f, say };
   }
@@ -245,7 +247,13 @@ function compileClue(text, C, ln) {
   const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (SEQ.includes(t)) return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
 
   // then / after chains. "A after B" is "B then A"; every chain is turned into then-form.
-  // Items written side by side form an unordered group that must sit in consecutive slots.
+  // Items written side by side form a group. A group is NOT required to sit in consecutive
+  // positions: only its earliest and latest member matter for the "then" links (as in the
+  // original solver). "A B then C"  =  C comes right after whichever of A, B is later.
+  //
+  // Evaluation works on bitmasks of ranks (rank = place in the sorted order of the unit), so
+  // no arrays are allocated in the hot path. For every group we keep two masks:
+  //   lo = ranks the group's earliest member may have, hi = ranks its latest member may have.
   function seq() {
     const isPh = t => /^\d*\?$/.test(t || '');
     const el = () => {
@@ -274,66 +282,82 @@ function compileClue(text, C, ln) {
     if (us.length > 1) fail(`Mixed units in one chain (${us.map(i => C[i].name).join(' and ')})`);
     const nc = defNC(us[0]), items = C[nc].items, unit = C[nc].name;
     addCat(nc);
-    const ord = items.map(v => items.filter(x => x < v).length);      // rank = place in sorted order of the unit
+    const base = nc * N;
+    const obit = items.map(v => 1 << items.filter(x => x < v).length);   // item index → single-bit mask of its rank
     const rkFn = t => {
-      if (t.k !== undefined) { const r = [ord[items.indexOf(t.k)]]; return () => r; }
+      if (t.k !== undefined) { const r = obit[items.indexOf(t.k)]; return () => r; }
       const rf = t.row;
-      return D => { const m = rf(D), o = []; for (let x = 0; x < N; x++) if (D[nc * N + x] & m) o.push(ord[x]); return o; };
+      return D => { const m = rf(D); let o = 0; for (let x = 0; x < N; x++) if (D[base + x] & m) o |= obit[x]; return o; };
     };
-    // possible (first,last) rank pairs of a group + whether it is certainly a consecutive block
-    const prof = (fns, D) => {
-      const sets = fns.map(f => f(D));
-      if (sets.length === 1) return { pr: [...new Set(sets[0].map(r => r * 64 + r))], ok: true };
-      let tot = 0, good = 0; const seen = new Set(), cur = [];
-      const rec = i => {
-        if (i === sets.length) {
-          tot++; let lo = 99, hi = -1, m = 0, dup = false;
-          for (const r of cur) { if (m >> r & 1) dup = true; m |= 1 << r; if (r < lo) lo = r; if (r > hi) hi = r; }
-          if (!dup && hi - lo === cur.length - 1) good++;
-          seen.add(lo * 64 + hi); return;
-        }
-        for (const r of sets[i]) { cur[i] = r; rec(i + 1); }
-      };
-      rec(0);
-      return { pr: [...seen], ok: tot === 0 ? false : good === tot ? true : good === 0 ? false : null };
+    // fills e.lo / e.hi (see above). Distinctness inside a group is ignored here (sound, and exact once everything is fixed).
+    const extent = (e, D) => {
+      const f = e.fns, n = f.length;
+      if (n === 1) { e.lo = e.hi = f[0](D); return; }
+      let u = 0, top = 31, bot = 0;
+      for (let i = 0; i < n; i++) {
+        const m = f[i](D);
+        if (!m) { e.lo = e.hi = 0; return; }
+        u |= m;
+        const h = highBit(m), l = lowBit(m);
+        if (h < top) top = h;
+        if (l > bot) bot = l;
+      }
+      e.lo = u & ((2 << top) - 1);      // earliest member can be v only if every member can still reach v or later
+      e.hi = u & ~((1 << bot) - 1);     // latest member can be v only if every member can still be at v or earlier
     };
-    const ph = e => e.g.length === 1 ? e.g[0].say : `${listAnd(e.g.map(t => t.say))} (side by side, in either order)`;
-    const vb = (e, s, pl) => e.g.length === 1 ? s : pl;
+    const ph = e => e.g.length === 1 ? e.g[0].say : `${listAnd(e.g.map(t => t.say))} (as a group)`;
+    const names = e => listAnd(e.g.map(t => t.say));
+    const first = e => e.g.length === 1 ? e.g[0].say : `the earliest of ${names(e)}`;
+    const last = e => e.g.length === 1 ? e.g[0].say : `the latest of ${names(e)}`;
+    const every = e => e.g.length === 1 ? e.g[0].say : `all of ${names(e)}`;
     const R_ = [], cons = [], parts = []; let pg = -1, gap = 0, plus = false, plain = true;
     E_.forEach((e, i) => {
       if (i) plus = plus || L_[i - 1];
       if (e.k) { gap += e.k; plain = false; return; }
-      const ei = R_.length, ent = { g: e.g, fns: e.g.map(rkFn) }; R_.push(ent);
+      const ei = R_.length, ent = { g: e.g, fns: e.g.map(rkFn), lo: 0, hi: 0 }; R_.push(ent);
       if (e.g.length > 1) plain = false;
       if (pg >= 0) {
         cons.push({ a: pg, e: ei, k: gap, pl: plus });
         const a = R_[pg];
         if (plus) plain = false;
-        parts.push(!plus && !gap ? `${ph(ent)} ${vb(ent, 'comes', 'come')} right after ${ph(a)}`
-          : !plus ? `${ph(ent)} ${vb(ent, 'comes', 'come')} after ${ph(a)} with exactly ${gap} other ${slots(gap)} in between`
-          : !gap ? `${ph(ent)} ${vb(ent, 'comes', 'come')} somewhere after ${ph(a)}, with any gap allowed`
-          : `${ph(ent)} ${vb(ent, 'comes', 'come')} somewhere after ${ph(a)}, with at least ${gap} other ${slots(gap)} in between`);
-      } else if (gap) { cons.push({ e: ei, lead: gap }); parts.push(`${ph(ent)} ${vb(ent, 'is', 'are')} not at the start: at least ${gap} ${slots(gap)} ${gap === 1 ? 'comes' : 'come'} before ${vb(ent, 'it', 'them')}`); }
+        parts.push(!plus && !gap ? `${first(ent)} comes right after ${last(a)}`
+          : !plus ? `${first(ent)} comes after ${last(a)}, with exactly ${gap} other ${places(gap)} in between`
+          : !gap ? `${every(ent)} ${ent.g.length === 1 ? 'comes' : 'come'} after ${every(a)}, with any gap allowed`
+          : `${first(ent)} comes later than ${last(a)}, with at least ${gap} other ${places(gap)} in between`);
+      } else if (gap) { cons.push({ e: ei, lead: gap }); parts.push(`${first(ent)} is not at the start: at least ${gap} ${places(gap)} come before it`); }
       pg = ei; gap = 0; plus = false;
     });
-    if (gap) { cons.push({ a: pg, trail: gap }); parts.push(`${ph(R_[pg])} ${vb(R_[pg], 'is', 'are')} not at the end: at least ${gap} ${slots(gap)} ${gap === 1 ? 'comes' : 'come'} after ${vb(R_[pg], 'it', 'them')}`); }
+    if (gap) { cons.push({ a: pg, trail: gap }); parts.push(`${last(R_[pg])} is not at the end: at least ${gap} ${places(gap)} come after it`); }
     const say = (plain && R_.length > 1
-      ? `Ordered by ${unit} (smallest first), they sit directly one after another in this order: ${R_.map(e => ph(e)).join(', then ')}.`
-      : `Ordered by ${unit} (smallest first): ${parts.join('; ')}.`);
-    const tri = (A, B, ok) => { let t = false, f = false; for (const a of A) for (const b of B) { if (ok(a, b)) t = true; else f = true; if (t && f) return null; } return t; };
+      ? `Sorted by ${unit} (smallest first), these sit directly one after another: ${R_.map(e => ph(e)).join(', then ')}.`
+      : `Sorted by ${unit} (smallest first): ${parts.join('; ')}.`);
     const f = D => {
-      const P = R_.map(e => prof(e.fns, D)), res = P.map(x => x.ok);
-      for (const c of cons) {
-        if (c.lead) res.push(tri(P[c.e].pr, [0], s => (s >> 6) >= c.lead));
-        else if (c.trail) res.push(tri(P[c.a].pr, [0], s => (s & 63) <= N - 1 - c.trail));
-        else res.push(tri(P[c.a].pr, P[c.e].pr, (sa, se) => { const ea = sa & 63, s2 = se >> 6; return c.pl ? s2 >= ea + 1 + c.k : s2 === ea + 1 + c.k; }));
+      for (let i = 0; i < R_.length; i++) extent(R_[i], D);
+      let unk = false;
+      for (let i = 0; i < cons.length; i++) {
+        const c = cons[i]; let r;
+        if (c.lead) {
+          const L = R_[c.e].lo;
+          r = !L ? false : lowBit(L) >= c.lead ? true : highBit(L) >= c.lead ? null : false;
+        } else if (c.trail) {
+          const H = R_[c.a].hi, lim = N - 1 - c.trail;
+          r = !H ? false : highBit(H) <= lim ? true : lowBit(H) <= lim ? null : false;
+        } else {
+          const A = R_[c.a].hi, B = R_[c.e].lo, s = 1 + c.k;
+          if (!A || !B) r = false;
+          else if (c.pl) r = lowBit(B) >= highBit(A) + s ? true : highBit(B) >= lowBit(A) + s ? null : false;
+          else if (s >= N) r = false;
+          else { const sh = A << s; r = (sh & B) === 0 ? false : (sh === B && lone(B)) ? true : null; }
+        }
+        if (r === false) return false;
+        if (r === null) unk = true;
       }
-      return fold3('and', res);
+      return unk ? null : true;
     };
     return { f, say: say.replace(/\.$/, '') };
   }
   function stmt() {
-    if (lw() === 'not') { nx(); const s = stmt(); return { f: D => not3(s.f(D)), say: `it is NOT true that ${s.say}` }; }
+    if (lw() === 'not') { nx(); const s = stmt(); return { f: D => not3(s.f(D)), say: `it is not the case that ${s.say}` }; }
     if (hasThen()) return seq();
     if (peek() === '(') {
       const save = p, sl = scope.length; let err;
@@ -353,7 +377,7 @@ function compileClue(text, C, ln) {
     if (peek() === '=>' || peek() === '<=>') {
       const o = nx(), b = chain();
       return o === '=>' ? { f: D => imp3(a.f(D), b.f(D)), say: `if ${a.say}, then ${b.say}` }
-        : { f: D => iff3(a.f(D), b.f(D)), say: `"${a.say}" is true exactly when "${b.say}" is true` };
+        : { f: D => iff3(a.f(D), b.f(D)), say: `${a.say} holds exactly when ${b.say} holds` };
     }
     return a;
   }
@@ -404,10 +428,15 @@ function makeSolver(C, cl, lm) {
     const c = cl[i], r = c.f(D);
     if (r === false) return false;
     if (r === true) return true;
-    for (const v of c.scope) {
-      const d = D[v]; if (lone(d)) continue;
+    const sc = c.scope;
+    for (let s = 0; s < sc.length; s++) {
+      const v = sc[s], d = D[v]; if (lone(d)) continue;
       let keep = d;
-      for (let x = 0; x < N; x++) { const bit = 1 << x; if (d & bit) { D[v] = bit; if (c.f(D) === false) keep &= ~bit; } }
+      for (let rest = d; rest; rest &= rest - 1) {
+        const bit = rest & -rest;
+        D[v] = bit;
+        if (c.f(D) === false) keep &= ~bit;
+      }
       D[v] = d;
       if (keep !== d) { if (!keep) return false; D[v] = keep; touch(v); }
     }
@@ -457,6 +486,22 @@ function makeSolver(C, cl, lm) {
     return { pos, inv };
   };
 
+  // branching variable: the smallest open domain among clues that are not yet certainly true.
+  // -1 = every clue is already true, -2 = open clues but nothing left to branch on
+  function choose(D) {
+    let best = -1, bs = 99, open = false;
+    for (let i = 0; i < J; i++) {
+      const c = cl[i];
+      if (c.f(D) === true) continue;
+      open = true;
+      const sc = c.scope;
+      for (let s = 0; s < sc.length; s++) { const v = sc[s], d = D[v]; if (!lone(d)) { const z = pop(d); if (z < bs) { bs = z; best = v; } } }
+    }
+    if (!open) return -1;
+    if (best < 0) { for (let v = N; v < V; v++) if (!lone(D[v])) return v; return -2; }
+    return best;
+  }
+
   // search (mode 0 = count, 1 = first solution, 2 = list all)
   let nodes = 0, nodeMax = 0, deadline = 0, acc = 0, found = null, out = null, outMax = 0, mode = 0;
   const tick = () => { if (++nodes > nodeMax || ((nodes & 255) === 0 && Date.now() > deadline)) throw OVER; };
@@ -473,20 +518,13 @@ function makeSolver(C, cl, lm) {
   }
   function rec(D) {
     tick();
-    let best = -1, bs = 99, open = false;
-    for (let i = 0; i < J; i++) {
-      const c = cl[i];
-      if (c.f(D) === true) continue;
-      open = true;
-      for (const v of c.scope) { const d = D[v]; if (!lone(d)) { const s = pop(d); if (s < bs) { bs = s; best = v; } } }
-    }
-    if (!open) return leaf(D);
-    if (best < 0) for (let v = N; v < V; v++) if (!lone(D[v])) { best = v; break; }
-    if (best < 0) return false;
+    const best = choose(D);
+    if (best === -1) return leaf(D);
+    if (best === -2) return false;
     const d = D[best];
-    for (let x = 0; x < N; x++) {
-      if (!(d >> x & 1)) continue;
-      const ch = D.slice(); ch[best] = 1 << x; touch(best);
+    for (let rest = d; rest; rest &= rest - 1) {
+      const bit = rest & -rest;
+      const ch = D.slice(); ch[best] = bit; touch(best);
       if (propagate(ch) && rec(ch)) return true;
     }
     return false;
@@ -528,25 +566,19 @@ function makeSolver(C, cl, lm) {
   }
 
   // Knuth-style random probes through the search tree: an unbiased estimate of the count when exact counting is too big
+  const ri_ = n => Math.floor(Math.random() * n);
   function estimate(D0, ms) {
     const end = Date.now() + ms; let sum = 0, n = 0;
     while (n < 20 || (n < 4000 && Date.now() < end)) {
       let D = D0, w = 1; n++;
       for (;;) {
-        let best = -1, bs = 99, open = false;
-        for (let i = 0; i < J; i++) {
-          const c = cl[i];
-          if (c.f(D) === true) continue;
-          open = true;
-          for (const v of c.scope) { const d = D[v]; if (!lone(d)) { const s = pop(d); if (s < bs) { bs = s; best = v; } } }
-        }
-        if (!open) { let f = 1; for (let c = 1; c < k && f; c++) f *= perm(D, c); sum += w * f; break; }
-        if (best < 0) for (let v = N; v < V; v++) if (!lone(D[v])) { best = v; break; }
-        if (best < 0) break;
+        const best = choose(D);
+        if (best === -1) { let f = 1; for (let c = 1; c < k && f; c++) f *= perm(D, c); sum += w * f; break; }
+        if (best === -2) break;
         const kids = [];
-        for (let x = 0; x < N; x++) {
-          if (!(D[best] >> x & 1)) continue;
-          const ch = D.slice(); ch[best] = 1 << x; touch(best);
+        for (let rest = D[best]; rest; rest &= rest - 1) {
+          const bit = rest & -rest;
+          const ch = D.slice(); ch[best] = bit; touch(best);
           if (propagate(ch)) kids.push(ch);
         }
         if (!kids.length) break;
@@ -555,7 +587,6 @@ function makeSolver(C, cl, lm) {
     }
     return sum / n;
   }
-  const ri_ = n => Math.floor(Math.random() * n);
 
   // root domains after clues 1..j (each step builds on the previous one)
   const roots = [];
@@ -631,23 +662,30 @@ const fmt = (n, kind = 0) => {
   return (kind === 2 ? '≥ ' : kind ? '≈ ' : big ? '≈ ' : '') + s;
 };
 
-// plain-language tooltip for each clue in the right panel
+/* ───────── plain-language tooltip: only while hovering a clue AND holding Shift ───────── */
 let TIPS = [];
+let hoverStep = null, shiftDown = false, lastPt = { clientX: 0, clientY: 0 }, curTip = -1;
 const tipEl = document.createElement('div');
+tipEl.className = 'tip';
 tipEl.setAttribute('role', 'tooltip');
-tipEl.style.cssText = 'position:fixed;z-index:9999;display:none;max-width:360px;padding:9px 12px;border-radius:8px;font:13px/1.5 system-ui,sans-serif;background:var(--panel-2,#1c2128);color:var(--text,#e6edf3);border:1px solid var(--border,#30363d);box-shadow:0 6px 20px rgba(0,0,0,.35);pointer-events:none;';
+tipEl.hidden = true;
 document.body.appendChild(tipEl);
-const placeTip = e => {
-  const pad = 14, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
-  let x = e.clientX + pad, y = e.clientY + pad;
-  if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
-  if (y + h > innerHeight - 8) y = Math.max(8, e.clientY - h - pad);
+const placeTip = pt => {
+  const pad = 16, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = pt.clientX + pad, y = pt.clientY + pad;
+  if (x + w > innerWidth - 8) x = Math.max(8, pt.clientX - w - pad);
+  if (y + h > innerHeight - 8) y = Math.max(8, pt.clientY - h - pad);
   tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
 };
-const showTip = (st, e) => {
-  const t = st && st.dataset.tip != null ? TIPS[+st.dataset.tip] : null;
-  if (!t) { tipEl.style.display = 'none'; return; }
-  tipEl.textContent = t; tipEl.style.display = 'block'; placeTip(e);
+const hideTip = () => { tipEl.hidden = true; curTip = -1; };
+const syncTip = () => {
+  const i = hoverStep && shiftDown ? +hoverStep.dataset.tip : -1;
+  if (!(i >= 0) || !TIPS[i]) return hideTip();
+  if (curTip !== i) {
+    tipEl.innerHTML = `<div class="tip-h"><span class="tip-n">Clue ${i + 1}</span><span class="tip-k">in plain words</span></div><div class="tip-b">${esc(TIPS[i])}</div>`;
+    curTip = i;
+  }
+  tipEl.hidden = false; placeTip(lastPt);
 };
 const setTags = (t, l) => { $('tagThr').textContent = 'THRESHOLD ' + t; $('tagList').textContent = 'LISTMAX ' + l; };
 
@@ -736,7 +774,7 @@ const placeCol = (k, target, after) => {
 function run() { // only ever called by the Update button, Ctrl+Enter, Example and Clear
   const out = $('out');
   let thr = DEF_THR, lm = DEF_LM;
-  ans = null; TIPS = [];
+  ans = null; TIPS = []; hoverStep = null; hideTip();
   window.GSEditor?.setError(null);
   try {
     const L = [];
@@ -817,12 +855,19 @@ $('ex').onclick = () => { setText(EX, true); run(); };
 $('clr').onclick = () => { setText('', true); run(); };
 $('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(); });
 
-// steps <-> editor: hover previews the clue line, click jumps to it
+// steps <-> editor: hover previews the clue line, click jumps to it; Shift + hover explains the clue
 const outEl = $('out');
-outEl.addEventListener('mouseover', e => { const st = e.target.closest('.step'); ED?.peek(st ? +st.dataset.line : null); showTip(st, e); });
-outEl.addEventListener('mousemove', e => { if (tipEl.style.display !== 'none') placeTip(e); });
-outEl.addEventListener('mouseleave', () => { ED?.peek(null); tipEl.style.display = 'none'; });
+outEl.addEventListener('mouseover', e => {
+  const st = e.target.closest('.step');
+  ED?.peek(st ? +st.dataset.line : null);
+  hoverStep = st; lastPt = e; shiftDown = e.shiftKey; syncTip();
+});
+outEl.addEventListener('mousemove', e => { lastPt = e; shiftDown = e.shiftKey; if (hoverStep) syncTip(); });
+outEl.addEventListener('mouseleave', () => { ED?.peek(null); hoverStep = null; syncTip(); });
 outEl.addEventListener('click', e => { const st = e.target.closest('.step'); if (st && ED) ED.goto(+st.dataset.line); });
+addEventListener('keydown', e => { if (e.key === 'Shift' && !shiftDown) { shiftDown = true; syncTip(); } });
+addEventListener('keyup', e => { if (e.key === 'Shift') { shiftDown = false; syncTip(); } });
+addEventListener('blur', () => { shiftDown = false; syncTip(); });
 
 // answer table: click header = use as rows, ‹ › or drag = reorder
 outEl.addEventListener('click', e => {
