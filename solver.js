@@ -1,16 +1,12 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then'.split(' '));
+const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after'.split(' '));
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
 const CMP = ['=', '!=', '<', '>'];
+const SEQ = ['then', 'then+', 'after', 'after+'];
+const MAXN = 12; // items per category
 class E extends Error { constructor(m, l) { super(m); this.line = l; } }
-
-const fold = (g, b) => {
-  const n = b.filter(Boolean).length;
-  return g === 'and' ? n === b.length : g === 'or' ? n > 0 : g === 'xor' ? n === 1 :
-    g === 'nand' ? n !== b.length : g === 'nor' ? n === 0 : n !== 1;
-};
 
 /* ───────── SETUP ───────── */
 function parseSetup(L) {
@@ -32,6 +28,7 @@ function parseSetup(L) {
   const N = full[0].tok.length;
   const bad = full.find(c => c.tok.length !== N);
   if (bad) throw new E(`"${bad.name}" has ${bad.tok.length} items but "${full[0].name}" has ${N}; all categories need the same size`, bad.n);
+  if (N > MAXN) throw new E(`Too many items: ${N} per category (maximum ${MAXN})`, full[0].n);
   for (const c of C) {
     const t = c.tok, i = t.indexOf('...');
     if (i < 0) {
@@ -50,39 +47,101 @@ function parseSetup(L) {
     c.num = c.items.every(x => typeof x === 'number');
     if (new Set(c.items).size !== N) throw new E(`"${c.name}" has duplicate items`, c.n);
     if (!c.num) for (const x of c.items) {
-      if (!/^[A-Za-z0-9_]+$/.test(x) || /^[a-z]$/.test(x)) throw new E(`Bad item name "${x}" (letters/digits only, not a single lowercase letter)`, c.n);
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(x) || /^[a-z]$/.test(x)) throw new E(`Bad item name "${x}" (start with a letter, then letters/digits/_ only; not a single lowercase letter)`, c.n);
       if (KW.has(x.toLowerCase())) throw new E(`"${x}" is a reserved word`, c.n);
     }
   }
   return C;
 }
 
+/* ───────── three-valued logic: true / false / null (= not decided yet) ───────── */
+const not3 = x => x === null ? null : !x;
+const GP = { and: (n, l) => n === l, or: n => n > 0, xor: n => n === 1, nand: (n, l) => n !== l, nor: n => n === 0, xnor: n => n !== 1 };
+function fold3(g, v) {
+  let t = 0, u = 0;
+  for (const x of v) { if (x === true) t++; else if (x === null) u++; }
+  const p = GP[g], len = v.length; let any = false, all = true;
+  for (let n = t; n <= t + u; n++) { if (p(n, len)) any = true; else all = false; }
+  return all ? true : any ? null : false;
+}
+const imp3 = (a, b) => (a === false || b === true) ? true : (a === true && b === false) ? false : null;
+const iff3 = (a, b) => (a === null || b === null) ? null : a === b;
+const lone = m => (m & (m - 1)) === 0;                                   // at most one bit set
+const pop = m => { let c = 0; while (m) { m &= m - 1; c++; } return c; };
+const rowEq = (ra, rb) => (ra & rb) === 0 ? false : (ra === rb && lone(ra) ? true : null);
+const cmpNum = (A, B, op) => {
+  let t = false, f = false;
+  for (const a of A) for (const b of B) {
+    const r = op === '=' ? Math.abs(a - b) < 1e-9 : op === '!=' ? Math.abs(a - b) >= 1e-9 : op === '<' ? a < b : a > b;
+    if (r) t = true; else f = true;
+    if (t && f) return null;
+  }
+  return t;
+};
+const comb = (A, B, plus) => { const s = new Set(); for (const a of A) for (const b of B) s.add(Math.round((plus ? a + b : a - b) * 1e6) / 1e6); return [...s]; };
+
+/* ───────── plain-language helpers (used for the tooltips) ───────── */
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const slots = n => n === 1 ? 'slot' : 'slots';
+const REL = { '=': ['goes with', 'equals'], '!=': ['does not go with', 'does not equal'], '<': ['is less than', 'is less than'], '>': ['is more than', 'is more than'] };
+const listAnd = xs => xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+const quant = (g, xs) => {
+  const two = xs.length === 2, [a, b] = xs;
+  switch (g) {
+    case 'and': return two ? `both ${a} and ${b}` : `each of ${xs.join(', ')}`;
+    case 'or': return two ? `${a} or ${b} (or both)` : `at least one of ${xs.join(', ')}`;
+    case 'xor': return two ? `${a} or ${b}, but not both` : `exactly one of ${xs.join(', ')}`;
+    default: return two ? `neither ${a} nor ${b}` : `none of ${xs.join(', ')}`; // nor
+  }
+};
+const GT = { and: 'all of these are true', or: 'at least one of these is true', xor: 'exactly one of these is true', nand: 'not all of these are true', nor: 'none of these is true', xnor: 'either none, or at least two, of these are true' };
+const gateText = (g, ss) => `${GT[g]}: ${ss.map((s, i) => `(${i + 1}) ${s}`).join('; ')}`;
+
 /* ───────── CLUES ───────── */
 function tokenize(s, ln) {
-  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|[tT][hH][eE][nN]\+|\d*\?|[A-Za-z0-9_.]+)/y;
+  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|(?:then|after)\+|\d*\?|[A-Za-z0-9_.]+)/yi;
   let m, last = 0;
   while ((m = re.exec(s))) { T.push(m[1]); last = re.lastIndex; }
   if (s.slice(last).trim()) throw new E(`Unexpected character "${s.slice(last).trim()[0]}"`, ln);
   return T;
 }
 
+// A compiled clue is { f(D) → true | false | null, say, scope }.
+// D holds one bitmask per variable (v = category*N + item): the rows that item may still be in.
+// f answers "true"/"false" only when that is certain for every row still allowed, otherwise null.
 function compileClue(text, C, ln) {
+  const N = C[0].items.length;
   const T = tokenize(text, ln); let p = 0;
   const peek = () => T[p], nx = () => T[p++], lw = () => (T[p] || '').toLowerCase();
   const fail = m => { throw new E(m, ln); };
   const expect = x => { if (nx() !== x) fail(`Expected "${x}"`); };
+  const scope = [];
+  const addVar = (c, i) => { if (c > 0) scope.push(c * N + i); };
+  const addCat = c => { if (c > 0) for (let i = 0; i < N; i++) scope.push(c * N + i); };
   const nums = C.map((c, i) => c.num ? i : -1).filter(i => i >= 0);
   const defNC = h => {
     if (h != null) return h;
     if (nums.length === 1) return nums[0];
     if (!nums.length) fail('No numeric category to do arithmetic on');
-    fail(`Which unit? Options: ${nums.map(i => `${C[i].name} [${C[i].tag}]`).join(', ')}. Write e.g. 500${C[nums[0]].tag}`);
+    fail(`Which unit? Options: ${nums.map(i => `${C[i].name} [${C[i].tag}]`).join(', ')}. Write e.g. 500${C[nums[0]].tag} or ${C[nums[0]].tag} of X`);
   };
-  const val = (t, nc) => t.num || (S => C[nc].items[S.inv[nc][t.row(S)]]);
+
+  // numeric value(s) an operand can take, in unit category nc
+  const valsFn = (t, nc) => {
+    if (t.k !== undefined) { const v = [t.k]; return () => v; }
+    if (t.vs) return t.vs;
+    addCat(nc);
+    const items = C[nc].items, r = t.row;
+    return D => { const m = r(D), o = []; for (let x = 0; x < N; x++) if (D[nc * N + x] & m) o.push(items[x]); return o; };
+  };
+  const vsay = (t, nc) => t.k !== undefined ? t.sv : t.vs ? t.say : `${C[nc].name} of ${t.base || t.say}`;
 
   function entity(w) {
     const tag = w.slice(-1), name = w.slice(0, -1), c = C.findIndex(x => x.tag === tag);
-    if (c >= 0 && !C[c].num) { const i = C[c].items.indexOf(name); if (i >= 0) return { row: S => S.pos[c][i] }; }
+    if (c >= 0 && !C[c].num) {
+      const i = C[c].items.indexOf(name);
+      if (i >= 0) { addVar(c, i); return { row: D => D[c * N + i], cat: c, idx: i, nc: null, say: `${C[c].name} ${name}` }; }
+    }
     const hit = C.find(x => !x.num && x.items.includes(w));
     if (hit) fail(`"${w}" is missing its tag. Did you mean "${w}${hit.tag}"?`);
     if (c < 0) fail(`Unknown word "${w}" (tag "${tag}" is not declared)`);
@@ -91,24 +150,31 @@ function compileClue(text, C, ln) {
   function prim() {
     const t = nx();
     if (t == null) fail('Clue ended early');
-    if (t === '(') { const a = arith(); expect(')'); return a; }
+    if (t === '(') { const a = arith(); expect(')'); return a.vs ? { ...a, say: `(${a.say})` } : a; }
     if (/^\d/.test(t)) {
       const m = t.match(/^(\d+(?:\.\d+)?)([a-z])?$/); if (!m) fail(`Bad number "${t}"`);
       const v = +m[1];
-      if (!m[2]) return { num: () => v, nc: null };
+      if (!m[2]) return { k: v, nc: null, say: String(v), sv: String(v) };
       const c = C.findIndex(x => x.tag === m[2]);
       if (c < 0 || !C[c].num) fail(`"${m[2]}" is not a numeric tag`);
       const i = C[c].items.indexOf(v);
       if (i < 0) fail(`${v} is not a value of ${C[c].name} (${C[c].items.join(', ')})`);
-      return { row: S => S.pos[c][i], num: () => v, nc: c };
+      addVar(c, i);
+      return { k: v, row: D => D[c * N + i], cat: c, idx: i, nc: c, say: `${C[c].name} ${v}`, sv: String(v) };
     }
-    if (KW.has(t.toLowerCase())) fail(`Unexpected "${t}" here. Statements joined by gates need parentheses`);
+    if (KW.has(t.toLowerCase()) || SEQ.includes(t.toLowerCase())) fail(`Unexpected "${t}" here. Statements joined by gates need parentheses`);
     if (/^[a-z]$/.test(t)) {
-      if (!C.some(x => x.tag === t)) fail(`Unknown tag "${t}"`);
+      const c = C.findIndex(x => x.tag === t);
+      if (c < 0) fail(`Unknown tag "${t}"`);
       if (lw() !== 'of') fail(`Tag "${t}" alone means a category; use "${t} of X"`);
       nx(); const q = prim();
       if (!q.row) fail(`"${t} of" needs an entity after it`);
-      return q;
+      const w = { ...q, base: q.base || q.say, say: `the ${C[c].name} of ${q.base || q.say}` };
+      if (C[c].num) { // "g of X" = the value of X in category g, so it also fixes the unit
+        if (q.nc != null && q.nc !== c) fail(`Mixed units: "${t} of" applied to a ${C[q.nc].name} value`);
+        w.nc = c;
+      }
+      return w;
     }
     return entity(t);
   }
@@ -117,13 +183,14 @@ function compileClue(text, C, ln) {
     while (peek() === '+' || peek() === '-') { ops.push(nx()); terms.push(prim()); }
     if (!ops.length) return terms[0];
     const u = [...new Set(terms.map(t => t.nc).filter(x => x != null))];
-    if (u.length > 1) fail('Mixed units in one expression');
-    const nc = defNC(u[0]), g = terms.map(t => val(t, nc));
-    return { nc, num: S => g.reduce((a, f, i) => i ? (ops[i - 1] === '+' ? a + f(S) : a - f(S)) : f(S), 0) };
+    if (u.length > 1) fail(`Mixed units in one expression (${u.map(i => C[i].name).join(' and ')})`);
+    const nc = defNC(u[0]), g = terms.map(t => valsFn(t, nc));
+    const vs = D => { let a = g[0](D); for (let i = 1; i < g.length; i++) a = comb(a, g[i](D), ops[i - 1] === '+'); return a; };
+    return { nc, vs, say: terms.map((t, i) => (i ? (ops[i - 1] === '+' ? ' plus ' : ' minus ') : '') + vsay(t, nc)).join('') };
   }
   function vals() {
     const terms = [arith()]; let j = null;
-    const more = () => peek() != null && ![')', '=>', '<=>', ...CMP].includes(peek()) && lw() !== 'then' && lw() !== 'then+';
+    const more = () => peek() != null && ![')', '=>', '<=>', ...CMP].includes(peek()) && !SEQ.includes(lw());
     while (more()) { // a space between values means "and"
       const g = GATES.includes(lw()) ? nx().toLowerCase() : 'and';
       if (j && g !== j) fail('Mixing different gates needs parentheses');
@@ -133,63 +200,145 @@ function compileClue(text, C, ln) {
   }
   function cmp1(a, b, op) {
     const numeric = op === '<' || op === '>' || !a.row || !b.row;
-    if (!numeric) return op === '=' ? S => a.row(S) === b.row(S) : S => a.row(S) !== b.row(S);
-    const nc = defNC(a.nc ?? b.nc), x = val(a, nc), y = val(b, nc);
-    return { '=': S => Math.abs(x(S) - y(S)) < 1e-9, '!=': S => Math.abs(x(S) - y(S)) >= 1e-9, '<': S => x(S) < y(S), '>': S => x(S) > y(S) }[op];
+    if (!numeric) return { f: op === '=' ? D => rowEq(a.row(D), b.row(D)) : D => not3(rowEq(a.row(D), b.row(D))), sa: a.say, sb: b.say, numeric };
+    if (a.nc != null && b.nc != null && a.nc !== b.nc) fail(`Mixed units: ${C[a.nc].name} and ${C[b.nc].name}`);
+    const nc = defNC(a.nc ?? b.nc), x = valsFn(a, nc), y = valsFn(b, nc);
+    return { f: D => cmpNum(x(D), y(D), op), sa: vsay(a, nc), sb: vsay(b, nc), numeric };
   }
   function comparison() {
     const L = vals(), op = nx();
-    if (!CMP.includes(op)) fail('Expected one of = != < >');
+    if (!CMP.includes(op)) {
+      if (SEQ.includes(String(op).toLowerCase())) fail('Gates (and/or/…) cannot be used inside a then/after chain. Put items side by side ("A B then C") or wrap separate chains in parentheses');
+      fail('Expected one of = != < >');
+    }
     const R = vals();
     if (CMP.includes(peek())) fail('Two comparisons in a row: wrap each statement in parentheses');
-    const [m, n] = [L.terms.length, R.terms.length];
-    if (m === 1 && n === 1) return cmp1(L.terms[0], R.terms[0], op);
+    const m = L.terms.length, n = R.terms.length;
+    if (m === 1 && n === 1) {
+      const c = cmp1(L.terms[0], R.terms[0], op);
+      return { f: c.f, say: `${c.sa} ${REL[op][c.numeric ? 1 : 0]} ${c.sb}` };
+    }
     if (m > 1 && n > 1) {
       if (op !== '=' || L.j !== 'and' || R.j !== 'and' || m !== n) fail('Two lists compare only as "A and B = C and D" of equal length');
-      const f = L.terms.map(a => R.terms.map(b => cmp1(a, b, '=')));
-      const pair = (S, i, used) => i === m || f[i].some((g, k) => !(used >> k & 1) && g(S) && pair(S, i + 1, used | 1 << k));
-      return S => pair(S, 0, 0);
+      const fn = L.terms.map(a => R.terms.map(b => cmp1(a, b, '=').f));
+      const exists = (v, ok) => { const rec = (i, used) => i === m || v[i].some((x, k) => !(used >> k & 1) && ok(x) && rec(i + 1, used | 1 << k)); return rec(0, 0); };
+      return {
+        f: D => { const v = fn.map(r => r.map(g => g(D))); return !exists(v, x => x !== false) ? false : exists(v, x => x === true) ? true : null; },
+        say: `${listAnd(L.terms.map(t => t.say))} are matched one-to-one with ${listAnd(R.terms.map(t => t.say))}, in either order`
+      };
     }
-    const j = m > 1 ? L.j : R.j;
-    if (j === 'and') fail('One thing cannot equal two things. Did you mean "or" / "xor"?');
-    const fs = m > 1 ? L.terms.map(a => cmp1(a, R.terms[0], op)) : R.terms.map(b => cmp1(L.terms[0], b, op));
-    return S => fold(j, fs.map(f => f(S)));
+    const lst = m > 1, j = lst ? L.j : R.j, one = lst ? R.terms[0] : L.terms[0];
+    if (op === '=' && j === 'and') fail('One thing cannot equal two things. Did you mean "or" / "xor"?');
+    if (op === '!=' && j !== 'and' && j !== 'or') fail(`"!=" with a list means "none of them", so join with "or" / "and" (e.g. A != B or C); "${j}" is not allowed here`);
+    const infos = lst ? L.terms.map(a => cmp1(a, one, op)) : R.terms.map(b => cmp1(one, b, op));
+    const g = op === '!=' ? 'and' : j;   // "A != B or C" = A is neither B nor C
+    const f = D => fold3(g, infos.map(i => i.f(D)));
+    const flip = { '<': '>', '>': '<' }, num = infos.some(i => i.numeric);
+    const gq = op === '!=' ? 'nor' : j, rop = op === '!=' ? '=' : lst ? (flip[op] || op) : op;
+    const subj = lst ? infos[0].sb : infos[0].sa, its = infos.map(i => lst ? i.sa : i.sb);
+    const say = (gq === 'nand' || gq === 'xnor')
+      ? gateText(gq, infos.map(i => `${i.sa} ${REL[op][i.numeric ? 1 : 0]} ${i.sb}`))
+      : `${subj} ${REL[rop][num ? 1 : 0]} ${quant(gq, its)}`;
+    return { f, say };
   }
-  const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (t === 'then' || t === 'then+') return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
+
+  const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (SEQ.includes(t)) return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
+
+  // then / after chains. "A after B" is "B then A"; every chain is turned into then-form.
+  // Items written side by side form an unordered group that must sit in consecutive slots.
   function seq() {
+    const isPh = t => /^\d*\?$/.test(t || '');
     const el = () => {
-      if (/^\d*\?$/.test(peek())) { const t = nx(), k = t === '?' ? 1 : +t.slice(0, -1); if (k < 1) fail('Placeholder count must be at least 1'); return { k }; }
+      if (isPh(peek())) { const t = nx(), k = t === '?' ? 1 : +t.slice(0, -1); if (k < 1) fail('Placeholder count must be at least 1'); return { k }; }
+      if (peek() == null) fail('"then" / "after" needs something on both sides');
       const g = [arith()];
-      while (peek() != null && lw() !== 'then' && lw() !== 'then+' && !GATES.includes(lw()) && ![')', '=>', '<=>', ...CMP].includes(peek())) g.push(arith());
+      while (peek() != null && !SEQ.includes(lw()) && !GATES.includes(lw()) && ![')', '=>', '<=>', ...CMP].includes(peek())) {
+        if (isPh(peek())) fail('Put "then" (or "after") between items and "?" placeholders');
+        g.push(arith());
+      }
+      if (g.length > 4) fail('At most 4 items can sit side by side in one group');
       return { g };
     };
-    const E_ = [el()], links = [];
-    while (lw() === 'then' || lw() === 'then+') { links.push(nx().toLowerCase() === 'then+'); E_.push(el()); }
-    if (E_.length < 2) fail('"then" needs something on both sides');
+    const els = [el()], lk = [];
+    while (SEQ.includes(lw())) { lk.push(nx().toLowerCase()); els.push(el()); }
+    if (CMP.includes(peek())) fail('A then/after chain cannot also be compared with = != < >. Put the chain in its own clue or in parentheses');
+    if (els.length < 2) fail('"then" / "after" needs something on both sides');
+    const dirs = new Set(lk.map(x => x.replace('+', '')));
+    if (dirs.size > 1) fail('Do not mix "then" and "after" in one chain. Use one direction, or write separate clues');
+    const rev = dirs.has('after');
+    const E_ = rev ? els.slice().reverse() : els, L_ = (rev ? lk.slice().reverse() : lk).map(x => x.endsWith('+'));
     const gs = E_.flatMap(e => e.g || []);
-    if (gs.some(t => !t.row)) fail('"then" works on entities / number+tag values, not arithmetic');
-    const nc = defNC(gs.map(t => t.nc).find(x => x != null)), N = C[0].items.length;
-    const ord = C[nc].items.map(v => C[nc].items.filter(x => x < v).length);
-    const rk = (t, S) => ord[S.inv[nc][t.row(S)]];
-    const st = (e, S) => Math.min(...e.g.map(t => rk(t, S))), en = (e, S) => Math.max(...e.g.map(t => rk(t, S)));
-    const cons = []; let pg = null, gap = 0, plus = false;
+    if (!gs.length) fail('A chain needs at least one entity, not only "?" placeholders');
+    if (gs.some(t => !t.row)) fail('"then" / "after" works on entities / number+tag values, not arithmetic');
+    const us = [...new Set(gs.map(t => t.nc).filter(x => x != null))];
+    if (us.length > 1) fail(`Mixed units in one chain (${us.map(i => C[i].name).join(' and ')})`);
+    const nc = defNC(us[0]), items = C[nc].items, unit = C[nc].name;
+    addCat(nc);
+    const ord = items.map(v => items.filter(x => x < v).length);      // rank = place in sorted order of the unit
+    const rkFn = t => {
+      if (t.k !== undefined) { const r = [ord[items.indexOf(t.k)]]; return () => r; }
+      const rf = t.row;
+      return D => { const m = rf(D), o = []; for (let x = 0; x < N; x++) if (D[nc * N + x] & m) o.push(ord[x]); return o; };
+    };
+    // possible (first,last) rank pairs of a group + whether it is certainly a consecutive block
+    const prof = (fns, D) => {
+      const sets = fns.map(f => f(D));
+      if (sets.length === 1) return { pr: [...new Set(sets[0].map(r => r * 64 + r))], ok: true };
+      let tot = 0, good = 0; const seen = new Set(), cur = [];
+      const rec = i => {
+        if (i === sets.length) {
+          tot++; let lo = 99, hi = -1, m = 0, dup = false;
+          for (const r of cur) { if (m >> r & 1) dup = true; m |= 1 << r; if (r < lo) lo = r; if (r > hi) hi = r; }
+          if (!dup && hi - lo === cur.length - 1) good++;
+          seen.add(lo * 64 + hi); return;
+        }
+        for (const r of sets[i]) { cur[i] = r; rec(i + 1); }
+      };
+      rec(0);
+      return { pr: [...seen], ok: tot === 0 ? false : good === tot ? true : good === 0 ? false : null };
+    };
+    const ph = e => e.g.length === 1 ? e.g[0].say : `${listAnd(e.g.map(t => t.say))} (side by side, in either order)`;
+    const vb = (e, s, pl) => e.g.length === 1 ? s : pl;
+    const R_ = [], cons = [], parts = []; let pg = -1, gap = 0, plus = false, plain = true;
     E_.forEach((e, i) => {
-      if (i) plus = plus || links[i - 1];
-      if (e.k) { gap += e.k; return; }
-      const a = pg, k = gap, pl = plus;
-      if (a) cons.push(pl ? S => st(e, S) >= en(a, S) + 1 + k : S => st(e, S) === en(a, S) + 1 + k); else if (k) cons.push(S => st(e, S) >= k);
-      pg = e; gap = 0; plus = false;
+      if (i) plus = plus || L_[i - 1];
+      if (e.k) { gap += e.k; plain = false; return; }
+      const ei = R_.length, ent = { g: e.g, fns: e.g.map(rkFn) }; R_.push(ent);
+      if (e.g.length > 1) plain = false;
+      if (pg >= 0) {
+        cons.push({ a: pg, e: ei, k: gap, pl: plus });
+        const a = R_[pg];
+        if (plus) plain = false;
+        parts.push(!plus && !gap ? `${ph(ent)} ${vb(ent, 'comes', 'come')} right after ${ph(a)}`
+          : !plus ? `${ph(ent)} ${vb(ent, 'comes', 'come')} after ${ph(a)} with exactly ${gap} other ${slots(gap)} in between`
+          : !gap ? `${ph(ent)} ${vb(ent, 'comes', 'come')} somewhere after ${ph(a)}, with any gap allowed`
+          : `${ph(ent)} ${vb(ent, 'comes', 'come')} somewhere after ${ph(a)}, with at least ${gap} other ${slots(gap)} in between`);
+      } else if (gap) { cons.push({ e: ei, lead: gap }); parts.push(`${ph(ent)} ${vb(ent, 'is', 'are')} not at the start: at least ${gap} ${slots(gap)} ${gap === 1 ? 'comes' : 'come'} before ${vb(ent, 'it', 'them')}`); }
+      pg = ei; gap = 0; plus = false;
     });
-    if (gap) { const a = pg, k = gap; cons.push(S => en(a, S) <= N - 1 - k); }
-    return S => cons.every(f => f(S));
+    if (gap) { cons.push({ a: pg, trail: gap }); parts.push(`${ph(R_[pg])} ${vb(R_[pg], 'is', 'are')} not at the end: at least ${gap} ${slots(gap)} ${gap === 1 ? 'comes' : 'come'} after ${vb(R_[pg], 'it', 'them')}`); }
+    const say = (plain && R_.length > 1
+      ? `Ordered by ${unit} (smallest first), they sit directly one after another in this order: ${R_.map(e => ph(e)).join(', then ')}.`
+      : `Ordered by ${unit} (smallest first): ${parts.join('; ')}.`);
+    const tri = (A, B, ok) => { let t = false, f = false; for (const a of A) for (const b of B) { if (ok(a, b)) t = true; else f = true; if (t && f) return null; } return t; };
+    const f = D => {
+      const P = R_.map(e => prof(e.fns, D)), res = P.map(x => x.ok);
+      for (const c of cons) {
+        if (c.lead) res.push(tri(P[c.e].pr, [0], s => (s >> 6) >= c.lead));
+        else if (c.trail) res.push(tri(P[c.a].pr, [0], s => (s & 63) <= N - 1 - c.trail));
+        else res.push(tri(P[c.a].pr, P[c.e].pr, (sa, se) => { const ea = sa & 63, s2 = se >> 6; return c.pl ? s2 >= ea + 1 + c.k : s2 === ea + 1 + c.k; }));
+      }
+      return fold3('and', res);
+    };
+    return { f, say: say.replace(/\.$/, '') };
   }
   function stmt() {
-    if (lw() === 'not') { nx(); const f = stmt(); return S => !f(S); }
+    if (lw() === 'not') { nx(); const s = stmt(); return { f: D => not3(s.f(D)), say: `it is NOT true that ${s.say}` }; }
     if (hasThen()) return seq();
     if (peek() === '(') {
-      const save = p; let err;
-      try { nx(); const f = top(); expect(')'); if (!CMP.includes(peek())) return f; } catch (e) { err = e; }
-      p = save;
+      const save = p, sl = scope.length; let err;
+      try { nx(); const s = top(); expect(')'); if (!CMP.includes(peek())) return s; } catch (e) { err = e; }
+      p = save; scope.length = sl;
       try { return comparison(); } catch (e) { throw err || e; }
     }
     return comparison();
@@ -197,44 +346,266 @@ function compileClue(text, C, ln) {
   function chain() {
     const fs = [stmt()]; let g = null;
     while (GATES.includes(lw())) { const x = nx().toLowerCase(); if (g && x !== g) fail('Mixing different gates needs parentheses'); g = x; fs.push(stmt()); }
-    return g ? S => fold(g, fs.map(f => f(S))) : fs[0];
+    return g ? { f: D => fold3(g, fs.map(s => s.f(D))), say: gateText(g, fs.map(s => s.say)) } : fs[0];
   }
   function top() {
     const a = chain();
-    if (peek() === '=>' || peek() === '<=>') { const o = nx(), b = chain(); return o === '=>' ? S => !a(S) || b(S) : S => a(S) === b(S); }
+    if (peek() === '=>' || peek() === '<=>') {
+      const o = nx(), b = chain();
+      return o === '=>' ? { f: D => imp3(a.f(D), b.f(D)), say: `if ${a.say}, then ${b.say}` }
+        : { f: D => iff3(a.f(D), b.f(D)), say: `"${a.say}" is true exactly when "${b.say}" is true` };
+    }
     return a;
   }
-  const f = top();
+  const s = top();
   if (p < T.length) fail(`Unexpected "${T[p]}"`);
-  return f;
+  return { f: s.f, say: cap(s.say) + '.', scope: [...new Set(scope)] };
 }
 
-/* ───────── SOLVER ───────── */
-const permute = n => { const o = [], r = (a, u) => { if (a.length === n) return o.push(a); for (let i = 0; i < n; i++) if (!u[i]) { u[i] = 1; r([...a, i], u); u[i] = 0; } }; r([], []); return o; };
-const invert = p => { const q = []; p.forEach((r, i) => q[r] = i); return q; };
+/* ───────── SOLVER ─────────
+   No enumeration of all grids. Every item has a set of rows it may still be in ("domain").
+   Each clue is re-checked whenever a domain it depends on changes; a row is removed when
+   putting the item there would break the clue. Counting then searches only the items that
+   unresolved clues still depend on, and multiplies in the free remainder as a permanent. */
+const CFG = { cnt: 20000, first: 3000, ms: 700, est: 200, sup: 500, pair: 1200, guard: 8000 };
+const OVER = { over: true };
 
-function solve(C, clues, lm) {
-  const N = C[0].items.length, k = C.length, m = clues.length, perms = permute(N), invs = perms.map(invert);
-  const total = Math.pow(perms.length, k - 1);
-  if (total > 4e6) throw new E(`Too large: ${total.toLocaleString()} combinations (limit 4,000,000)`);
-  const id = [...Array(N).keys()], S = { pos: [id], inv: [id] };
-  const walk = leaf => { const r = c => { if (c === k) return leaf(); for (let q = 0; q < perms.length; q++) { S.pos[c] = perms[q]; S.inv[c] = invs[q]; r(c + 1); } }; r(1); };
-  const prefix = () => { let p = 0; while (p < m && clues[p](S)) p++; return p; };
-  const cnt = Array(m + 1).fill(0), hit = Array.from({ length: m + 1 }, () => C.map(() => Array.from({ length: N }, () => Array(N).fill(0))));
-  walk(() => { const p = prefix(); cnt[p]++; for (let c = 1; c < k; c++) for (let i = 0; i < N; i++) hit[p][c][i][S.pos[c][i]]++; });
-  const left = Array(m + 2).fill(0), certain = [], acc = C.map(() => Array.from({ length: N }, () => Array(N).fill(0)));
-  for (let j = m; j >= 0; j--) {
-    left[j] = left[j + 1] + cnt[j];
-    const cm = new Map();
-    for (let c = 1; c < k; c++) for (let i = 0; i < N; i++) for (let r = 0; r < N; r++) {
-      acc[c][i][r] += hit[j][c][i][r];
-      if (left[j] > 0 && acc[c][i][r] === left[j]) cm.set(c + '.' + i, r);
+function makeSolver(C, cl, lm) {
+  const N = C[0].items.length, k = C.length, V = k * N, FULL = (1 << N) - 1, m = cl.length;
+  const byVar = Array.from({ length: V }, () => []);
+  cl.forEach((c, i) => c.scope.forEach(v => byVar[v].push(i)));
+  const fact = [1]; for (let i = 1; i <= N; i++) fact[i] = fact[i - 1] * i;
+  const total = Math.pow(fact[N], k - 1);
+  let J = 0;                                                  // clues 0..J-1 are active
+  const qc = [], inq = new Uint8Array(m), dc = new Uint8Array(k);
+  const touch = v => { dc[(v / N) | 0] = 1; for (const i of byVar[v]) if (i < J && !inq[i]) { inq[i] = 1; qc.push(i); } };
+  const clearQ = () => { for (const i of qc) inq[i] = 0; qc.length = 0; dc.fill(0); };
+  const setD = (D, v, nm) => { if (nm === D[v]) return true; if (!nm) return false; D[v] = nm; touch(v); return true; };
+
+  function alldiff(D, c) {
+    const b = c * N;
+    for (let ch = 1; ch;) {
+      ch = 0;
+      for (let i = 0; i < N; i++) {
+        const d = D[b + i];
+        if (!d) return false;
+        if (lone(d)) for (let q = 0; q < N; q++) if (q !== i && (D[b + q] & d)) { if (!setD(D, b + q, D[b + q] & ~d)) return false; ch = 1; }
+      }
+      for (let r = 0; r < N; r++) {
+        let cnt = 0, who = -1;
+        for (let i = 0; i < N; i++) if (D[b + i] >> r & 1) { cnt++; who = i; }
+        if (!cnt) return false;
+        if (cnt === 1 && D[b + who] !== 1 << r) { D[b + who] = 1 << r; touch(b + who); ch = 1; }
+      }
     }
-    certain[j] = cm;
+    return true;
   }
-  const jmin = [...Array(m).keys()].map(x => x + 1).find(j => left[j] <= lm), leaves = [];
-  if (jmin) walk(() => { const p = prefix(); if (p >= jmin) leaves.push({ p, pos: S.pos.map(x => x.slice()), inv: S.inv.map(x => x.slice()) }); });
-  return { left, certain, leaves, jmin, total };
+  function revise(D, i) {
+    const c = cl[i], r = c.f(D);
+    if (r === false) return false;
+    if (r === true) return true;
+    for (const v of c.scope) {
+      const d = D[v]; if (lone(d)) continue;
+      let keep = d;
+      for (let x = 0; x < N; x++) { const bit = 1 << x; if (d & bit) { D[v] = bit; if (c.f(D) === false) keep &= ~bit; } }
+      D[v] = d;
+      if (keep !== d) { if (!keep) return false; D[v] = keep; touch(v); }
+    }
+    return true;
+  }
+  function propagate(D) {
+    for (;;) {
+      const c = dc.indexOf(1);
+      if (c >= 0) { dc[c] = 0; if (!alldiff(D, c)) { clearQ(); return false; } continue; }
+      if (!qc.length) return true;
+      const i = qc.pop(); inq[i] = 0;
+      if (!revise(D, i)) { clearQ(); return false; }
+    }
+  }
+
+  // number of ways to fill category c within its domains (permanent of the domain matrix)
+  const dp = new Float64Array(1 << N);
+  function perm(D, c) {
+    const b = c * N; let used = 0;
+    for (let i = 0; i < N; i++) if (lone(D[b + i])) used |= D[b + i];
+    const rest = FULL & ~used; let n = 0, uni = true;
+    for (let i = 0; i < N; i++) { const d = D[b + i]; if (!lone(d)) { n++; if (d !== rest) uni = false; } }
+    if (uni && n === pop(rest)) return fact[n];
+    dp.fill(0); dp[0] = 1;
+    for (let mask = 0; mask < 1 << N; mask++) {
+      const v = dp[mask]; if (!v) continue;
+      const i = pop(mask); if (i >= N) continue;
+      let cand = D[b + i] & ~mask;
+      while (cand) { const bit = cand & -cand; dp[mask | bit] += v; cand ^= bit; }
+    }
+    return dp[FULL];
+  }
+  function matchAll(D, c, lim) {
+    const b = c * N, out = [], cur = new Array(N);
+    const go = (i, used) => {
+      if (i === N) { out.push(cur.slice()); return out.length >= lim; }
+      let cand = D[b + i] & ~used;
+      while (cand) { const bit = cand & -cand; cand ^= bit; cur[i] = 31 - Math.clz32(bit); if (go(i + 1, used | bit)) return true; }
+      return false;
+    };
+    go(0, 0); return out;
+  }
+  const flat = pick => { const r = new Int32Array(V); for (let i = 0; i < N; i++) r[i] = i; pick.forEach((rows, c) => rows.forEach((x, i) => { r[(c + 1) * N + i] = x; })); return r; };
+  const toSol = rows => {
+    const pos = [], inv = [];
+    for (let c = 0; c < k; c++) { const p = [], q = []; for (let i = 0; i < N; i++) { p[i] = rows[c * N + i]; q[p[i]] = i; } pos.push(p); inv.push(q); }
+    return { pos, inv };
+  };
+
+  // search (mode 0 = count, 1 = first solution, 2 = list all)
+  let nodes = 0, nodeMax = 0, deadline = 0, acc = 0, found = null, out = null, outMax = 0, mode = 0;
+  const tick = () => { if (++nodes > nodeMax || ((nodes & 255) === 0 && Date.now() > deadline)) throw OVER; };
+  function leaf(D) {
+    if (mode === 0) { let f = 1; for (let c = 1; c < k && f; c++) f *= perm(D, c); acc += f; return false; }
+    const per = [];
+    for (let c = 1; c < k; c++) { const ml = matchAll(D, c, mode === 1 ? 1 : Infinity); if (!ml.length) return false; per.push(ml); }
+    if (mode === 1) { found = flat(per.map(x => x[0])); return true; }
+    const pick = [], cross = c => {
+      if (c === per.length) { if (out.length >= outMax) throw OVER; out.push(toSol(flat(pick))); return; }
+      for (const r of per[c]) { pick[c] = r; cross(c + 1); }
+    };
+    cross(0); return false;
+  }
+  function rec(D) {
+    tick();
+    let best = -1, bs = 99, open = false;
+    for (let i = 0; i < J; i++) {
+      const c = cl[i];
+      if (c.f(D) === true) continue;
+      open = true;
+      for (const v of c.scope) { const d = D[v]; if (!lone(d)) { const s = pop(d); if (s < bs) { bs = s; best = v; } } }
+    }
+    if (!open) return leaf(D);
+    if (best < 0) for (let v = N; v < V; v++) if (!lone(D[v])) { best = v; break; }
+    if (best < 0) return false;
+    const d = D[best];
+    for (let x = 0; x < N; x++) {
+      if (!(d >> x & 1)) continue;
+      const ch = D.slice(); ch[best] = 1 << x; touch(best);
+      if (propagate(ch) && rec(ch)) return true;
+    }
+    return false;
+  }
+  const first = D => {
+    mode = 1; found = null; nodes = 0; nodeMax = CFG.first; deadline = Date.now() + 400;
+    try { rec(D); } catch (e) { if (e !== OVER) throw e; clearQ(); return undefined; }
+    return found;                                              // rows | null (none) | undefined (gave up)
+  };
+
+  // which items can share a row with which: M[a][b][x] = bitmask of items y of b that can be with item x of a.
+  // base = only against category 0 (enough for "certain" facts)
+  function supports(D, base, ms) {
+    const M = Array.from({ length: k }, () => Array.from({ length: k }, () => new Array(N).fill(0)));
+    const dl = Date.now() + ms, rowOf = (rows, c, i) => c ? rows[c * N + i] : i;
+    const set = (a, x, b, y) => { M[a][b][x] |= 1 << y; M[b][a][y] |= 1 << x; };
+    const mark = rows => {
+      for (let a = 0; a < (base ? 1 : k); a++) for (let x = 0; x < N; x++) {
+        const ra = rowOf(rows, a, x);
+        for (let b = a + 1; b < k; b++) for (let y = 0; y < N; y++) if (rows[b * N + y] === ra) set(a, x, b, y);
+      }
+    };
+    const s0 = first(D);
+    if (s0) mark(s0);
+    else if (s0 === null) return M;                           // no solution at all
+    for (let a = 0; a < (base ? 1 : k - 1); a++) for (let x = 0; x < N; x++) for (let b = a + 1; b < k; b++) for (let y = 0; y < N; y++) {
+      if (M[a][b][x] >> y & 1) continue;
+      const inter = (a ? D[a * N + x] : 1 << x) & D[b * N + y];
+      for (let r = 0; r < N && !(M[a][b][x] >> y & 1); r++) {
+        const bit = 1 << r; if (!(inter & bit)) continue;
+        if (Date.now() > dl) { set(a, x, b, y); break; }        // out of time: keep it as "possible"
+        const ch = D.slice(); if (a) { ch[a * N + x] = bit; touch(a * N + x); } ch[b * N + y] = bit; touch(b * N + y);
+        if (!propagate(ch)) continue;
+        const s = first(ch);
+        if (s) mark(s); else if (s === undefined) set(a, x, b, y);
+      }
+    }
+    return M;
+  }
+
+  // Knuth-style random probes through the search tree: an unbiased estimate of the count when exact counting is too big
+  function estimate(D0, ms) {
+    const end = Date.now() + ms; let sum = 0, n = 0;
+    while (n < 20 || (n < 4000 && Date.now() < end)) {
+      let D = D0, w = 1; n++;
+      for (;;) {
+        let best = -1, bs = 99, open = false;
+        for (let i = 0; i < J; i++) {
+          const c = cl[i];
+          if (c.f(D) === true) continue;
+          open = true;
+          for (const v of c.scope) { const d = D[v]; if (!lone(d)) { const s = pop(d); if (s < bs) { bs = s; best = v; } } }
+        }
+        if (!open) { let f = 1; for (let c = 1; c < k && f; c++) f *= perm(D, c); sum += w * f; break; }
+        if (best < 0) for (let v = N; v < V; v++) if (!lone(D[v])) { best = v; break; }
+        if (best < 0) break;
+        const kids = [];
+        for (let x = 0; x < N; x++) {
+          if (!(D[best] >> x & 1)) continue;
+          const ch = D.slice(); ch[best] = 1 << x; touch(best);
+          if (propagate(ch)) kids.push(ch);
+        }
+        if (!kids.length) break;
+        w *= kids.length; D = kids[ri_(kids.length)];
+      }
+    }
+    return sum / n;
+  }
+  const ri_ = n => Math.floor(Math.random() * n);
+
+  // root domains after clues 1..j (each step builds on the previous one)
+  const roots = [];
+  { const D = new Int32Array(V); for (let c = 0; c < k; c++) for (let i = 0; i < N; i++) D[c * N + i] = c ? FULL : 1 << i; roots[0] = D; }
+  function rootFor(j) {
+    if (j in roots) return roots[j];
+    const prev = rootFor(j - 1);
+    if (prev === null) return roots[j] = null;
+    const D = prev.slice(); J = j; clearQ();
+    inq[j - 1] = 1; qc.push(j - 1);
+    return roots[j] = propagate(D) ? D : null;
+  }
+
+  const steps = [], t0 = Date.now();
+  return {
+    total,
+    estimate(j, ms) { const D = rootFor(j); J = j; return estimate(D, ms); },
+    step(j) {
+      if (steps[j]) return steps[j];
+      const D = rootFor(j); J = j;
+      if (!D) return steps[j] = { count: 0, kind: 0, certain: new Map(), sols: null };
+      const late = Date.now() - t0 > CFG.guard, sc = late ? 0.2 : 1;   // after the guard time, steps get a fifth of the budget
+      mode = 0; acc = 0; nodes = 0; nodeMax = CFG.cnt * sc; deadline = Date.now() + CFG.ms * sc;
+      let kind = 0;
+      try { rec(D.slice()); } catch (e) { if (e !== OVER) throw e; kind = 2; clearQ(); }
+      if (kind === 2) { J = j; const e = estimate(D, CFG.est * sc); if (e > acc) acc = e; kind = 3; }   // too big to count exactly → estimate
+      if (kind === 0 && acc > 2 ** 53) kind = 1;                // beyond exact double precision
+      let sols = null, certain = new Map();
+      if (kind === 0 && acc > 0 && acc <= lm) {
+        mode = 2; out = []; outMax = lm; nodes = 0; nodeMax = 1e6; deadline = Date.now() + CFG.ms;
+        try { rec(D.slice()); sols = out; } catch (e) { if (e !== OVER) throw e; clearQ(); }
+      }
+      if (sols) {
+        for (let c = 1; c < k; c++) for (let i = 0; i < N; i++) { const r = sols[0].pos[c][i]; if (sols.every(s => s.pos[c][i] === r)) certain.set(c + '.' + i, r); }
+      } else if (kind !== 0 || acc > 0) {
+        const M = supports(D, true, CFG.sup * sc);
+        for (let b = 1; b < k; b++) for (let y = 0; y < N; y++) {
+          let mk = 0; for (let x = 0; x < N; x++) if (M[0][b][x] >> y & 1) mk |= 1 << x;
+          if (mk && lone(mk)) certain.set(b + '.' + y, 31 - Math.clz32(mk));
+        }
+      }
+      return steps[j] = { count: acc, kind, certain, sols };
+    },
+    // cand(a, x, b): items of category b that can still share a row with item x of category a
+    pairs(j) {
+      const D = rootFor(j); if (!D) return null; J = j;
+      const M = supports(D, false, CFG.pair);
+      return (a, x, b) => { const o = []; for (let y = 0; y < N; y++) if (M[a][b][x] >> y & 1) o.push(y); return o; };
+    }
+  };
 }
 
 /* ───────── UI ───────── */
@@ -253,6 +624,31 @@ THRESHOLD = 1
 SOLVE`;
 
 const DEF_THR = 1, DEF_LM = 10;
+
+// kind: 0 exact · 1 beyond exact precision · 2 lower bound (search budget ran out) · 3 estimate
+const fmt = (n, kind = 0) => {
+  const big = n >= 1e15, s = kind === 0 && !big ? n.toLocaleString() : n < 1e9 ? Math.round(+n.toPrecision(3)).toLocaleString() : n.toExponential(2).replace('e+', '×10^');
+  return (kind === 2 ? '≥ ' : kind ? '≈ ' : big ? '≈ ' : '') + s;
+};
+
+// plain-language tooltip for each clue in the right panel
+let TIPS = [];
+const tipEl = document.createElement('div');
+tipEl.setAttribute('role', 'tooltip');
+tipEl.style.cssText = 'position:fixed;z-index:9999;display:none;max-width:360px;padding:9px 12px;border-radius:8px;font:13px/1.5 system-ui,sans-serif;background:var(--panel-2,#1c2128);color:var(--text,#e6edf3);border:1px solid var(--border,#30363d);box-shadow:0 6px 20px rgba(0,0,0,.35);pointer-events:none;';
+document.body.appendChild(tipEl);
+const placeTip = e => {
+  const pad = 14, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+  if (y + h > innerHeight - 8) y = Math.max(8, e.clientY - h - pad);
+  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+};
+const showTip = (st, e) => {
+  const t = st && st.dataset.tip != null ? TIPS[+st.dataset.tip] : null;
+  if (!t) { tipEl.style.display = 'none'; return; }
+  tipEl.textContent = t; tipEl.style.display = 'block'; placeTip(e);
+};
 const setTags = (t, l) => { $('tagThr').textContent = 'THRESHOLD ' + t; $('tagList').textContent = 'LISTMAX ' + l; };
 
 /* ───────── answer table ───────── */
@@ -276,8 +672,9 @@ function initOrder(C) {
 }
 
 // cand(a, x, b): which items of category b can share a row with item x of category a
-function makeCand(C, certain, leaves) {
+function makeCand(C, certain, leaves, pairs) {
   const N = C[0].items.length;
+  if (pairs) return pairs;
   if (leaves) return (a, x, b) => { const s = new Set(); for (const L of leaves) s.add(L.inv[b][L.pos[a][x]]); return [...s].sort((p, q) => p - q); };
   return (a, x, b) => {
     const r = a === 0 ? x : certain.get(a + '.' + x);
@@ -291,7 +688,7 @@ function makeCand(C, certain, leaves) {
 function renderAnswer(focusK) {
   const box = $('answer');
   if (!box || !ans || !ord) return;
-  const { C, cand, count } = ans, N = C[0].items.length, rc = ord.o[0], cols = ord.o.slice(1);
+  const { C, cand, count, kind } = ans, N = C[0].items.length, rc = ord.o[0], cols = ord.o.slice(1);
   const sty = c => `--c:${catColor(c)}`;
   const rowIdx = [...Array(N).keys()];
   if (C[rc].num) rowIdx.sort((a, b) => C[rc].items[a] - C[rc].items[b]);
@@ -311,7 +708,7 @@ function renderAnswer(focusK) {
       `<span class="ch-name">${esc(C[k].name)}</span><span class="ch-tag">[${C[k].tag}]</span>` +
       `<button type="button" class="ch-mv" data-d="1" aria-label="Move ${esc(C[k].name)} right"${p === cols.length - 1 ? ' disabled' : ''}>›</button></span></th>`).join('');
   box.hidden = false;
-  box.innerHTML = `<div class="answer-head"><span class="answer-title${count === 1 ? '' : ' part'}">${count === 1 ? 'Solution' : `${count.toLocaleString()} possibilities left`}</span>` +
+  box.innerHTML = `<div class="answer-head"><span class="answer-title${count === 1 && kind === 0 ? '' : ' part'}">${count === 1 && kind === 0 ? 'Solution' : `${fmt(count, kind)} possibilities left`}</span>` +
     `<span class="answer-hint">Click a header to use it as rows · drag or ‹ › to reorder</span></div>` +
     `<div class="answer-scroll"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
     (unsure ? '<div class="answer-note"><b>?</b> not determined yet · several names = still possible</div>' : '');
@@ -339,7 +736,7 @@ const placeCol = (k, target, after) => {
 function run() { // only ever called by the Update button, Ctrl+Enter, Example and Clear
   const out = $('out');
   let thr = DEF_THR, lm = DEF_LM;
-  ans = null;
+  ans = null; TIPS = [];
   window.GSEditor?.setError(null);
   try {
     const L = [];
@@ -361,31 +758,38 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
     if (!setup.length) throw new E('Missing SETUP section');
     const C = parseSetup(setup);
     const fns = clues.map(c => compileClue(c.t, C, c.n));
-    const R = solve(C, fns, lm);
+    TIPS = fns.map(f => f.say);
+    const R = makeSolver(C, fns, lm);
     const nm = (c, i) => C[c].items[i] + C[c].tag, N = C[0].items.length;
     const line = s => Array.from({ length: N }, (_, r) => C.map((_, c) => nm(c, c ? s.inv[c][r] : r)).join(' ')).join('  |  ');
-    const facts = j => [...R.certain[j]].filter(([k]) => !R.certain[j - 1].has(k)).map(([k, r]) => { const [c, i] = k.split('.'); return `${nm(0, r)} = ${nm(+c, +i)}`; });
-    let h = `<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${R.total.toLocaleString()}</span><span class="stat-lbl">Start</span></div>`;
-    let last = R.total, stop = 0, html = '';
+    const sts = [{ count: R.total, kind: R.total > 2 ** 53 ? 1 : 0, certain: new Map(), sols: null }];
+    const facts = j => [...sts[j].certain].filter(([k]) => !sts[j - 1].certain.has(k)).map(([k, r]) => { const [c, i] = k.split('.'); return `${nm(0, r)} = ${nm(+c, +i)}`; });
+    let h = `<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${fmt(sts[0].count, sts[0].kind)}</span><span class="stat-lbl">Start</span></div>`;
+    let last = sts[0], stop = 0, html = '';
     for (let j = 1; j <= clues.length; j++) {
-      const c = R.left[j], prev = R.left[j - 1], f = facts(j);
-      html += `<div class="step animate-in" data-line="${clues[j - 1].n}"><div class="step-head"><span class="step-n">${j}</span><code class="step-clue">${esc(clues[j - 1].t)}</code><span class="step-count">${c.toLocaleString()} <small>−${(prev - c).toLocaleString()}</small></span></div>`;
+      const st = R.step(j), prev = sts[j - 1], exact = st.kind === 0;
+      sts[j] = st;
+      const f = facts(j), delta = exact && prev.kind === 0 ? ` <small>−${fmt(prev.count - st.count)}</small>` : '';
+      html += `<div class="step animate-in" data-line="${clues[j - 1].n}" data-tip="${j - 1}"><div class="step-head"><span class="step-n">${j}</span><code class="step-clue">${esc(clues[j - 1].t)}</code><span class="step-count">${fmt(st.count, st.kind)}${delta}</span></div>`;
       if (f.length) html += `<div class="chips">${f.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>`;
-      if (c > 0 && c <= lm && R.jmin <= j) html += `<div class="sols">${R.leaves.filter(s => s.p >= j).map(s => `<div class="sol">${esc(line(s))}</div>`).join('')}</div>`;
-      html += '</div>'; last = c;
-      if (c === 0) { html += `<div class="warn-banner">Contradiction at clue ${j}: no arrangement satisfies clues 1–${j}. Check that clue.</div>`; window.GSEditor?.setError(clues[j - 1].n, `Contradiction: no arrangement satisfies clues 1–${j}`); stop = j; break; }
-      if (c <= thr) { html += `<div class="solved-banner">${c === 1 ? 'Single solution found' : `Threshold reached: ${c} possibilities`} after clue ${j}${j < clues.length ? ` (${clues.length - j} clue(s) not needed)` : ''}.</div>`; stop = j; break; }
+      if (st.sols) html += `<div class="sols">${st.sols.map(s => `<div class="sol">${esc(line(s))}</div>`).join('')}</div>`;
+      html += '</div>'; last = st;
+      if (exact && st.count === 0) { html += `<div class="warn-banner">Contradiction at clue ${j}: no arrangement satisfies clues 1–${j}. Check that clue.</div>`; window.GSEditor?.setError(clues[j - 1].n, `Contradiction: no arrangement satisfies clues 1–${j}`); stop = j; break; }
+      if (exact && st.count <= thr) { html += `<div class="solved-banner">${st.count === 1 ? 'Single solution found' : `Threshold reached: ${st.count} possibilities`} after clue ${j}${j < clues.length ? ` (${clues.length - j} clue(s) not needed)` : ''}.</div>`; stop = j; break; }
     }
-    if (!stop) html += `<div class="warn-banner">${last.toLocaleString()} possibilities remain after all clues (threshold ${thr}).</div>`;
-    h += `<div class="stat-chip green"><span class="stat-val">${last.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div><div class="stat-chip accent"><span class="stat-val">${clues.length}</span><span class="stat-lbl">Clues</span></div></div>`;
+    if (!stop) html += `<div class="warn-banner">${fmt(last.count, last.kind)} possibilities remain after all clues (threshold ${thr}).</div>`;
+    h += `<div class="stat-chip green"><span class="stat-val">${fmt(last.count, last.kind)}</span><span class="stat-lbl">Remaining</span></div><div class="stat-chip accent"><span class="stat-val">${clues.length}</span><span class="stat-lbl">Clues</span></div></div>`;
     out.innerHTML = h + html + '<div class="answer" id="answer" hidden></div>';
-    $('badge').textContent = last.toLocaleString() + ' left';
+    $('badge').textContent = fmt(last.count, last.kind) + ' left';
 
     // answer table: shown once the clues give a result (unique solution, or the best picture so far)
-    if (clues.length && last > 0) {
-      const endJ = stop || clues.length, certain = R.certain[endJ];
-      const lv = R.jmin !== undefined && R.jmin <= endJ && last <= lm ? R.leaves.filter(s => s.p >= endJ) : null;
-      if (lv || certain.size) { ans = { C, count: last, cand: makeCand(C, certain, lv) }; initOrder(C); renderAnswer(); }
+    if (clues.length && !(last.kind === 0 && last.count === 0)) {
+      const st = sts[stop || clues.length];
+      if (st.sols || st.certain.size) {
+        const pairs = st.sols ? null : R.pairs(stop || clues.length);
+        ans = { C, count: st.count, kind: st.kind, cand: makeCand(C, st.certain, st.sols, pairs) };
+        initOrder(C); renderAnswer();
+      }
     }
   } catch (e) {
     if (!(e instanceof E)) throw e;
@@ -415,8 +819,9 @@ $('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey 
 
 // steps <-> editor: hover previews the clue line, click jumps to it
 const outEl = $('out');
-outEl.addEventListener('mouseover', e => { const st = e.target.closest('.step'); ED?.peek(st ? +st.dataset.line : null); });
-outEl.addEventListener('mouseleave', () => ED?.peek(null));
+outEl.addEventListener('mouseover', e => { const st = e.target.closest('.step'); ED?.peek(st ? +st.dataset.line : null); showTip(st, e); });
+outEl.addEventListener('mousemove', e => { if (tipEl.style.display !== 'none') placeTip(e); });
+outEl.addEventListener('mouseleave', () => { ED?.peek(null); tipEl.style.display = 'none'; });
 outEl.addEventListener('click', e => { const st = e.target.closest('.step'); if (st && ED) ED.goto(+st.dataset.line); });
 
 // answer table: click header = use as rows, ‹ › or drag = reorder
