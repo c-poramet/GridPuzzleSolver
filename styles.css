@@ -230,3 +230,25 @@ body.resizing,body.resizing *{cursor:col-resize!important;user-select:none!impor
 .answer-note{margin-top:8px;font-size:var(--fs-2xs);color:var(--text-dim)}
 .answer-note b{color:var(--text-sec)}
 @media (max-width:720px){.splitter{display:none}.answer-hint{margin-left:0}}
+
+/* ───────── plain-language tooltip (Shift + hover on a clue) ───────── */
+.tip{
+  position:fixed;top:0;left:0;z-index:100;
+  width:max-content;max-width:min(340px,calc(100vw - 24px));
+  background:var(--surface-2);
+  border:1px solid var(--border-md);
+  border-left:3px solid var(--clr-green);
+  border-radius:var(--radius-sm);
+  box-shadow:0 14px 40px rgba(0,0,0,.65),0 2px 8px rgba(0,0,0,.4);
+  pointer-events:none;           /* never steals hover from the clue underneath */
+  animation:tipIn .12s ease-out both;
+}
+.tip[hidden]{display:none}
+.tip-h{display:flex;align-items:baseline;gap:8px;padding:9px 12px 0}
+.tip-n{font-family:var(--font-mono);font-size:var(--fs-2xs);font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--clr-green)}
+.tip-k{font-size:var(--fs-2xs);color:var(--text-dim)}
+.tip-b{padding:6px 12px 11px;font-size:var(--fs-sm);line-height:1.55;color:var(--text-pri);overflow-wrap:anywhere}
+
+@keyframes tipIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){.tip{animation:none}}
