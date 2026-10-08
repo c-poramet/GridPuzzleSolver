@@ -44,6 +44,9 @@ THRESHOLD = 1
 | `A then B` | B is immediately after A in the numeric order |
 | `A then ? then B` | One unknown slot between; `3?` means three |
 | `A B then ?` | Loose group (any order, not necessarily adjacent), then the next slot |
+| `A then+ B` | B is somewhere after A (any gap) |
+| `A then ? then+ B` | At least one slot between A and B (`3?` = at least three) |
+| `A B then+ C D` | Both C and D come after the later of A and B |
 | `THRESHOLD = n` | Stop when ≤ n possibilities remain (default 1) |
 | `LISTMAX = n` | List possibilities when ≤ n remain (default 50) |
 

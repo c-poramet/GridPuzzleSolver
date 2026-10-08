@@ -57,7 +57,7 @@ comparison := values CMP values
 values     := term ( GATE term )*       same GATE throughout
 term       := prim ( ("+"|"-") prim )*  left to right, no * / or unary minus
 prim       := ENTITY | NUMBER[unit] | tag "of" prim | "(" term ")"
-order      := slot ( "then" slot )+     see ORDER below
+order      := slot ( ("then" | "then+") slot )+     see ORDER below
 slot       := "?" | N"?" | prim prim*   (N = positive integer, e.g. 3?)
 GATE: and or xor nand nor xnor        CMP: = != < >
 CRUCIAL: gates written after a comparison's right side are swallowed into that
@@ -81,9 +81,15 @@ value list. To join two statements parenthesize each:
 
 # ORDER ("then") - numeric order, ascending by the numeric category's value
 - "A then B": B is IMMEDIATELY after A (next slot up).
+- "A then+ B": B is somewhere after A, any gap allowed (same idea as A < B but it
+  also chains and takes groups and "?"). "then" is exact; "then+" is "at least".
 - "?" is one unknown slot, "3?" is three unknown slots. They count as occupied.
     A then ? then B        B is two slots after A
     A then 3? then B       B is four slots after A
+    A then ? then+ B       at least one slot between (B is 2 or more slots after A)
+    A then+ B then+ C      A, B, C in that order, gaps allowed
+    A then B then+ C       B right after A, C anywhere after B
+    A B then+ C D          C and D both after the later of A and B
     A then B then C        three consecutive slots
     ? then A               A has at least one slot before it
     A then 2?              A has at least two slots after it
@@ -97,8 +103,8 @@ value list. To join two statements parenthesize each:
 - Order category: the only numeric category, else the unit of any number+tag in the
   clue (e.g. "Id then 1000g"). If several numeric categories exist, include one such
   literal or use arithmetic recipes instead.
-- Arithmetic is not allowed inside "then". Use one "then" per statement; combine
-  statements with parentheses: (A then B) or (B then A).
+- Arithmetic is not allowed inside "then" / "then+". Combine order statements with
+  gates only via parentheses: (A then B) or (B then A).
 
 # TRANSLATION RECIPES
 | Clue wording | GSL |
@@ -124,7 +130,9 @@ value list. To join two statements parenthesize each:
 | A, B, C all different | (A != B) and (B != C) and (A != C) |
 | A is immediately before B | A then B |
 | A is two places before B (one between) | A then ? then B |
-| A is somewhere before B | A < B |
+| A is somewhere before B (any gap) | A then+ B |
+| A, B, C in that order, gaps allowed | A then+ B then+ C |
+| At least one between A and B | A then ? then+ B |
 | A and B are adjacent (either order) | (A then B) or (B then A) |
 | A is between B and C (anywhere) | ((B < A) and (A < C)) or ((C < A) and (A < B)) |
 | A is not first / last | ? then A / A then ? |

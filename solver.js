@@ -59,7 +59,7 @@ function parseSetup(L) {
 
 /* ───────── CLUES ───────── */
 function tokenize(s, ln) {
-  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|\d*\?|[A-Za-z0-9_.]+)/y;
+  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|[tT][hH][eE][nN]\+|\d*\?|[A-Za-z0-9_.]+)/y;
   let m, last = 0;
   while ((m = re.exec(s))) { T.push(m[1]); last = re.lastIndex; }
   if (s.slice(last).trim()) throw new E(`Unexpected character "${s.slice(last).trim()[0]}"`, ln);
@@ -150,16 +150,16 @@ function compileClue(text, C, ln) {
     const fs = m > 1 ? L.terms.map(a => cmp1(a, R.terms[0], op)) : R.terms.map(b => cmp1(L.terms[0], b, op));
     return S => fold(j, fs.map(f => f(S)));
   }
-  const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (t === 'then') return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
+  const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (t === 'then' || t === 'then+') return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
   function seq() {
     const el = () => {
       if (/^\d*\?$/.test(peek())) { const t = nx(), k = t === '?' ? 1 : +t.slice(0, -1); if (k < 1) fail('Placeholder count must be at least 1'); return { k }; }
       const g = [arith()];
-      while (peek() != null && lw() !== 'then' && !GATES.includes(lw()) && ![')', '=>', '<=>', ...CMP].includes(peek())) g.push(arith());
+      while (peek() != null && lw() !== 'then' && lw() !== 'then+' && !GATES.includes(lw()) && ![')', '=>', '<=>', ...CMP].includes(peek())) g.push(arith());
       return { g };
     };
-    const E_ = [el()];
-    while (lw() === 'then') { nx(); E_.push(el()); }
+    const E_ = [el()], links = [];
+    while (lw() === 'then' || lw() === 'then+') { links.push(nx().toLowerCase() === 'then+'); E_.push(el()); }
     if (E_.length < 2) fail('"then" needs something on both sides');
     const gs = E_.flatMap(e => e.g || []);
     if (gs.some(t => !t.row)) fail('"then" works on entities / number+tag values, not arithmetic');
@@ -167,13 +167,14 @@ function compileClue(text, C, ln) {
     const ord = C[nc].items.map(v => C[nc].items.filter(x => x < v).length);
     const rk = (t, S) => ord[S.inv[nc][t.row(S)]];
     const st = (e, S) => Math.min(...e.g.map(t => rk(t, S))), en = (e, S) => Math.max(...e.g.map(t => rk(t, S)));
-    const cons = []; let pg = null, gap = 0;
-    for (const e of E_) {
-      if (e.k) { gap += e.k; continue; }
-      const a = pg, k = gap;
-      if (a) cons.push(S => st(e, S) === en(a, S) + 1 + k); else if (k) cons.push(S => st(e, S) >= k);
-      pg = e; gap = 0;
-    }
+    const cons = []; let pg = null, gap = 0, plus = false;
+    E_.forEach((e, i) => {
+      if (i) plus = plus || links[i - 1];
+      if (e.k) { gap += e.k; return; }
+      const a = pg, k = gap, pl = plus;
+      if (a) cons.push(pl ? S => st(e, S) >= en(a, S) + 1 + k : S => st(e, S) === en(a, S) + 1 + k); else if (k) cons.push(S => st(e, S) >= k);
+      pg = e; gap = 0; plus = false;
+    });
     if (gap) { const a = pg, k = gap; cons.push(S => en(a, S) <= N - 1 - k); }
     return S => cons.every(f => f(S));
   }
