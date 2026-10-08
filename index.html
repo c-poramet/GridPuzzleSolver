@@ -23,11 +23,38 @@
 <main class="main">
   <div class="solver-layout">
     <section class="left-panel panel">
-      <div class="panel-title">Puzzle</div>
-      <textarea id="src" spellcheck="false"></textarea>
+      <div class="panel-head">
+        <div class="panel-title">Puzzle</div>
+        <button class="title-link" id="kbBtn" type="button" aria-expanded="false" aria-controls="kbPop">Shortcuts</button>
+      </div>
+      <div class="kb-pop" id="kbPop" hidden>
+        <div class="kb-row"><span>Solve now</span><kbd>Ctrl/⌘ Enter</kbd></div>
+        <div class="kb-row"><span>Suggestions</span><kbd>Ctrl Space</kbd></div>
+        <div class="kb-row"><span>Accept / close suggestion</span><kbd>Tab · Esc</kbd></div>
+        <div class="kb-row"><span>Toggle comment</span><kbd>Ctrl/⌘ /</kbd></div>
+        <div class="kb-row"><span>Move line</span><kbd>Alt ↑ ↓</kbd></div>
+        <div class="kb-row"><span>Duplicate line</span><kbd>Shift Alt ↑ ↓</kbd></div>
+        <div class="kb-row"><span>Select a line</span><kbd>click its number</kbd></div>
+        <div class="kb-row"><span>Jump to a clue</span><kbd>click its step</kbd></div>
+      </div>
+      <div class="editor" id="editor">
+        <div class="ed-gutter" aria-hidden="true"><div class="ed-gutter-in" id="edGut"></div></div>
+        <div class="ed-body">
+          <div class="ed-bars" id="edBars" aria-hidden="true"></div>
+          <div class="ed-hl" aria-hidden="true"><div class="ed-hl-in" id="edHl"></div></div>
+          <textarea id="src" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" wrap="off" aria-label="Puzzle source"></textarea>
+        </div>
+      </div>
+      <div class="legend" id="legend" hidden></div>
+      <div class="ed-status">
+        <span class="ed-mode" id="stMode">—</span>
+        <span id="stPos">Ln 1, Col 1</span>
+        <span class="ed-msg" id="stMsg"></span>
+      </div>
       <button class="btn-primary" id="run">Update now (Ctrl+Enter)</button>
       <div class="btn-row">
         <button class="btn-ghost" id="ex">Example</button>
+        <button class="btn-ghost" id="cp">Copy</button>
         <button class="btn-ghost" id="clr">Clear</button>
       </div>
     </section>
@@ -49,6 +76,8 @@
 </main>
 
 <footer class="footer"><span class="footer-credit">Grid Solver · 2026</span></footer>
+<div class="ac" id="ac" hidden role="listbox"></div>
+<script src="editor.js"></script>
 <script src="solver.js"></script>
 </body>
 </html>

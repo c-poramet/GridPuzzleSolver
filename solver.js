@@ -255,9 +255,11 @@ SOLVE`;
 function run(force) {
   const out = $('out');
   let thr = 1, lm = 50;
+  window.GSEditor?.setError(null);
   try {
     const L = [];
     const txt = $('src').value, raw = txt.split('\n');
+    if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; $('tagThr').textContent = 'THRESHOLD 1'; $('tagList').textContent = 'LISTMAX 50'; return; }
     if (!force && !txt.endsWith('\n')) raw.pop(); // live mode waits for Enter
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
     let mode = 0, setup = [], clues = [], done = false;
@@ -285,11 +287,11 @@ function run(force) {
     let last = R.total, stop = 0, html = '';
     for (let j = 1; j <= clues.length; j++) {
       const c = R.left[j], prev = R.left[j - 1], f = facts(j);
-      html += `<div class="step animate-in"><div class="step-head"><span class="step-n">${j}</span><code class="step-clue">${esc(clues[j - 1].t)}</code><span class="step-count">${c.toLocaleString()} <small>−${(prev - c).toLocaleString()}</small></span></div>`;
+      html += `<div class="step animate-in" data-line="${clues[j - 1].n}"><div class="step-head"><span class="step-n">${j}</span><code class="step-clue">${esc(clues[j - 1].t)}</code><span class="step-count">${c.toLocaleString()} <small>−${(prev - c).toLocaleString()}</small></span></div>`;
       if (f.length) html += `<div class="chips">${f.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>`;
       if (c > 0 && c <= lm && R.jmin <= j) html += `<div class="sols">${R.leaves.filter(s => s.p >= j).map(s => `<div class="sol">${esc(line(s))}</div>`).join('')}</div>`;
       html += '</div>'; last = c;
-      if (c === 0) { html += `<div class="warn-banner">Contradiction at clue ${j}: no arrangement satisfies clues 1–${j}. Check that clue.</div>`; stop = j; break; }
+      if (c === 0) { html += `<div class="warn-banner">Contradiction at clue ${j}: no arrangement satisfies clues 1–${j}. Check that clue.</div>`; window.GSEditor?.setError(clues[j - 1].n, `Contradiction: no arrangement satisfies clues 1–${j}`); stop = j; break; }
       if (c <= thr) { html += `<div class="solved-banner">${c === 1 ? 'Single solution found' : `Threshold reached: ${c} possibilities`} after clue ${j}${j < clues.length ? ` (${clues.length - j} clue(s) not needed)` : ''}.</div>`; stop = j; break; }
     }
     if (!stop) html += `<div class="warn-banner">${last.toLocaleString()} possibilities remain after all clues (threshold ${thr}).</div>`;
@@ -298,15 +300,30 @@ function run(force) {
     $('badge').textContent = last.toLocaleString() + ' left';
   } catch (e) {
     if (!(e instanceof E)) throw e;
+    window.GSEditor?.setError(e.line, e.message);
     out.innerHTML = `<div class="warn-banner">${e.line ? `Line ${e.line}: ` : ''}${esc(e.message)}</div>`;
     $('badge').textContent = 'error';
   }
 }
 
-$('src').value = EX;
+const PH = $('out').innerHTML;
+const store = {
+  get() { try { return localStorage.getItem('gridsolver.src'); } catch (e) { return null; } },
+  set(v) { try { localStorage.setItem('gridsolver.src', v); } catch (e) {} }
+};
+const ED = window.GSEditor;
+const setText = (v, top) => ED ? ED.setText(v, top) : ($('src').value = v);
+$('src').value = store.get() ?? EX;
+ED?.refresh();
 $('run').onclick = () => run(true);
-let tm; $('src').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => run(false), 250); });
-$('ex').onclick = () => { $('src').value = EX; };
-$('clr').onclick = () => { $('src').value = ''; };
+let tm; $('src').addEventListener('input', () => { store.set($('src').value); clearTimeout(tm); tm = setTimeout(() => run(false), 250); });
+$('ex').onclick = () => { setText(EX, true); run(true); };
+$('clr').onclick = () => { setText('', true); };
 $('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(true); });
+
+// steps <-> editor: hover previews the clue line, click jumps to it
+const outEl = $('out');
+outEl.addEventListener('mouseover', e => { const st = e.target.closest('.step'); ED?.peek(st ? +st.dataset.line : null); });
+outEl.addEventListener('mouseleave', () => ED?.peek(null));
+outEl.addEventListener('click', e => { const st = e.target.closest('.step'); if (st && ED) ED.goto(+st.dataset.line); });
 run(true);
