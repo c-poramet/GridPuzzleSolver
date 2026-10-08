@@ -1,55 +1,104 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after'.split(' '));
+const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in exactly atleast atmost alldiff allsame total sum avg max min default unit ordered circular unordered each'.split(' '));
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
-const CMP = ['=', '!=', '<', '>'];
+const CMP = ['=', '!=', '<', '>', '<=', '>='];
 const SEQ = ['then', 'then+', 'after', 'after+'];
 const MAXN = 12; // items per category
 class E extends Error { constructor(m, l) { super(m); this.line = l; } }
 
 /* ───────── SETUP ───────── */
 function parseSetup(L) {
-  const C = [], tags = new Set();
+  const C = [], tags = new Set(), explicit = new Set();
+  const sets = {
+    days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    weekdays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+    months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+    seasons: ['Spring', 'Summer', 'Autumn', 'Winter'],
+    zodiac: ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces']
+  };
+  const words = s => { const a = [], r = /"((?:\\.|[^"])*)"|(\S+)/g; let m; while ((m = r.exec(s))) a.push(m[1] != null ? m[1].replace(/\\"/g, '"') : m[2]); return a; };
   for (const { t, n } of L) {
-    const m = t.match(/^(\S+)\s*\[([^\]]*)\]\s*(.*)$/);
+    const m = t.match(/^(?:"((?:\\.|[^"])*)"|(\S+))\s*(?:\[([^\]]*)\])?\s*(.*)$/);
     if (!m) throw new E('Expected: name [tag] items…', n);
-    const [, name, tag, rest] = m;
-    if (!/^[a-z]$/.test(tag)) throw new E(`Tag [${tag}] must be exactly one lowercase letter`, n);
-    if (tags.has(tag)) throw new E(`Tag [${tag}] is already used`, n);
-    if (KW.has(name.toLowerCase())) throw new E(`"${name}" is a reserved word`, n);
-    tags.add(tag);
-    const tok = rest.split(/\s+/).filter(Boolean);
+    const name = m[1] != null ? m[1].replace(/\\"/g, '"') : m[2], tag0 = m[3] || '', rest = m[4];
+    if (tag0 && !/^[a-z]+$/.test(tag0)) throw new E(`Tag [${tag0}] must be one or more lowercase letters`, n);
+    if (tag0 && tags.has(tag0)) throw new E(`Tag [${tag0}] is already used`, n);
+    if (C.some(c => c.name.toLowerCase() === name.toLowerCase())) throw new E(`Category "${name}" is already used`, n);
+    const tok0 = words(rest), mods = [];
+    while (tok0.length && /^(ordered|circular|unordered)$/i.test(tok0[0])) mods.push(tok0.shift().toLowerCase());
+    const tok = tok0;
     if (!tok.length) throw new E(`Category "${name}" has no items`, n);
-    C.push({ name, tag, tok, n });
+    if (tag0) { tags.add(tag0); explicit.add(tag0); }
+    C.push({ name, tag: tag0, tok, n, ordered: mods.includes('ordered') || mods.includes('circular'), circular: mods.includes('circular'), unordered: mods.includes('unordered'), explicit: !!tag0 });
   }
-  const full = C.filter(c => !c.tok.includes('...'));
+  // Reserve every explicit tag before assigning automatic prefixes.
+  for (const c of C) if (!c.tag) {
+    const base = c.name.toLowerCase().replace(/[^a-z]/g, '') || 'c';
+    let tag = '';
+    for (let z = 1; z <= base.length && !tag; z++) {
+      const q = base.slice(0, z);
+      if (!tags.has(q) && !C.some(x => x !== c && x.name.toLowerCase() === q)) tag = q;
+    }
+    if (!tag) { let z = 1; while (tags.has(base + z)) z++; tag = base + z; }
+    c.tag = tag; tags.add(tag);
+  }
+  const predefined = x => sets[String(x).toLowerCase()];
+  for (const c of C) if (c.tok.length === 1 && predefined(c.tok[0])) { c.tok = predefined(c.tok[0]).slice(); c.predefined = true; c.ordered = !c.unordered; }
+  const full = C.filter(c => !c.tok.includes('...') && !c.tok.includes('..'));
   if (!full.length) throw new E('At least one category needs a full item list to set the size', C[0].n);
   const N = full[0].tok.length;
   const bad = full.find(c => c.tok.length !== N);
   if (bad) throw new E(`"${bad.name}" has ${bad.tok.length} items but "${full[0].name}" has ${N}; all categories need the same size`, bad.n);
   if (N > MAXN) throw new E(`Too many items: ${N} per category (maximum ${MAXN})`, full[0].n);
   for (const c of C) {
-    const t = c.tok, i = t.indexOf('...');
+    const t = c.tok.map(x => x === '..' ? '...' : x), i = t.indexOf('...');
     if (i < 0) {
       c.items = t.every(x => !isNaN(x)) ? t.map(Number) : t;
     } else {
-      const v = t.filter(x => x !== '...').map(Number);
-      if (v.some(isNaN) || t.indexOf('...') !== t.lastIndexOf('...')) throw new E(`"${c.name}": "..." only works with numbers, once`, c.n);
+      const vraw = t.filter(x => x !== '...');
+      const named = vraw.every(x => /^[A-Za-z]+$/.test(x)) && vraw.length >= 2
+        && Object.values(sets).some(a => vraw.every(x => a.some(y => y.toLowerCase() === x.toLowerCase())));
+      const letterRange = vraw.length === 2 && /^[A-Za-z]$/.test(vraw[0]) && /^[A-Za-z]$/.test(vraw[1])
+        && (vraw[0] === vraw[0].toUpperCase()) === (vraw[1] === vraw[1].toUpperCase());
+      const v = vraw.map(Number);
       let a;
-      if (i === 0 && v.length >= 2) { const s = v[v.length - 1] - v[v.length - 2]; a = v.slice(); while (a.length < N) a.unshift(a[0] - s); }
-      else if (i === t.length - 1 && v.length >= 2) { const s = v[1] - v[0]; a = v.slice(); while (a.length < N) a.push(a[a.length - 1] + s); }
-      else if (t.length === 3 && i === 1) { const s = (v[1] - v[0]) / (N - 1); a = Array.from({ length: N }, (_, k) => v[0] + s * k); }
-      else throw new E(`"${c.name}": use "a b ...", "... y z" or "a ... z"`, c.n);
+      if (named) {
+        const set = Object.values(sets).find(a => vraw.every(x => a.some(y => y.toLowerCase() === x.toLowerCase())));
+        if (!set) throw new E(`"${c.name}": range endpoints must come from one predefined set`, c.n);
+        const ix = x => set.findIndex(y => y.toLowerCase() === x.toLowerCase() || y.slice(0, 3).toLowerCase() === x.toLowerCase());
+        let a = [], q = ix(vraw[0]), z = ix(vraw[vraw.length - 1]);
+        for (let j = 0; ; j++) { a.push(set[q]); if (q === z || j > MAXN) break; q = (q + 1) % set.length; }
+        c.items = a; c.ordered = !c.unordered;
+      } else if (letterRange) {
+        const start = vraw[0].charCodeAt(0), end = vraw[1].charCodeAt(0), step = start <= end ? 1 : -1;
+        c.items = Array.from({ length: Math.abs(end - start) + 1 }, (_, k) => String.fromCharCode(start + k * step));
+        if (c.items.length > MAXN) throw new E(`"${c.name}" range expands to ${c.items.length} items (maximum ${MAXN}); choose a narrower end`, c.n);
+        a = c.items;
+      } else if (v.some(isNaN) || t.indexOf('...') !== t.lastIndexOf('...')) throw new E(`"${c.name}": "..." only works with numbers or named sets, once`, c.n);
+      if (named) a = c.items;
+      else if (!letterRange && i === 0 && v.length >= 2) { const s = v[v.length - 1] - v[v.length - 2]; a = v.slice(); while (a.length < N) a.unshift(a[0] - s); }
+      else if (!letterRange && i === t.length - 1 && v.length >= 2) { const s = v[1] - v[0]; a = v.slice(); while (a.length < N) a.push(a[a.length - 1] + s); }
+      else if (!letterRange && t.length === 3 && i === 1) { const s = (v[1] - v[0]) / (N - 1); a = Array.from({ length: N }, (_, k) => v[0] + s * k); }
+      else if (!letterRange) throw new E(`"${c.name}": use "a b ...", "... y z" or "a ... z"`, c.n);
       if (a.length !== N) throw new E(`"${c.name}" expands to ${a.length} items, expected ${N}`, c.n);
-      c.items = a.map(x => Math.round(x * 1e6) / 1e6);
+      c.items = a.map(x => typeof x === 'number' ? Math.round(x * 1e6) / 1e6 : x);
     }
     c.num = c.items.every(x => typeof x === 'number');
+    if (!c.num && c.items.some(x => String(x).split('/').some(y => /^-?\d+(?:\.\d+)?$/.test(y)))) throw new E(`Numeric items in "${c.name}" cannot have aliases`, c.n);
     if (new Set(c.items).size !== N) throw new E(`"${c.name}" has duplicate items`, c.n);
     if (!c.num) for (const x of c.items) {
-      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(x) || /^[a-z]$/.test(x)) throw new E(`Bad item name "${x}" (start with a letter, then letters/digits/_ only; not a single lowercase letter)`, c.n);
-      if (KW.has(x.toLowerCase())) throw new E(`"${x}" is a reserved word`, c.n);
+      if (!/^([A-Za-z][A-Za-z0-9_ ]*(?:\/[A-Za-z][A-Za-z0-9_ ]*)*|[a-z])$/.test(x)) throw new E(`Bad item name "${x}" (quote names containing spaces or punctuation)`, c.n);
+      if (new Set(c.items.map(y => String(y).toLowerCase())).size !== c.items.length) throw new E(`"${c.name}" has duplicate items`, c.n);
     }
+    c.aliases = new Map();
+    c.items = c.items.map(x => {
+      const parts = String(x).split('/');
+      const display = parts.shift(); for (const a of parts) c.aliases.set(a.toLowerCase(), display);
+      return c.num ? x : display;
+    });
+    if (c.predefined) for (const x of c.items) c.aliases.set(x.slice(0, 3).toLowerCase(), x);
   }
   return C;
 }
@@ -74,7 +123,7 @@ const rowEq = (ra, rb) => (ra & rb) === 0 ? false : (ra === rb && lone(ra) ? tru
 const cmpNum = (A, B, op) => {
   let t = false, f = false;
   for (const a of A) for (const b of B) {
-    const r = op === '=' ? Math.abs(a - b) < 1e-9 : op === '!=' ? Math.abs(a - b) >= 1e-9 : op === '<' ? a < b : a > b;
+    const r = op === '=' ? Math.abs(a - b) < 1e-9 : op === '!=' ? Math.abs(a - b) >= 1e-9 : op === '<' ? a < b : op === '>' ? a > b : op === '<=' ? a <= b + 1e-9 : a >= b - 1e-9;
     if (r) t = true; else f = true;
     if (t && f) return null;
   }
@@ -101,9 +150,9 @@ const gateText = (g, ss) => `${GT[g]}: ${ss.map((s, i) => `(${i + 1}) ${s}`).joi
 
 /* ───────── CLUES ───────── */
 function tokenize(s, ln) {
-  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|(?:then|after)\+|\d*\?|[A-Za-z0-9_.]+)/yi;
+  const T = [], re = /\s*(<=>|=>|!=|<=|>=|[=<>+\-*\/~(),:{}.]|(?:then|after)\+|\d*\?|"(?:\\.|[^"])*"|[A-Za-z0-9_.'"]+)/yi;
   let m, last = 0;
-  while ((m = re.exec(s))) { T.push(m[1]); last = re.lastIndex; }
+  while ((m = re.exec(s))) { T.push(m[1].replace(/^"|"$/g, '').replace(/\\"/g, '"')); last = re.lastIndex; }
   if (s.slice(last).trim()) throw new E(`Unexpected character "${s.slice(last).trim()[0]}"`, ln);
   return T;
 }
@@ -111,7 +160,34 @@ function tokenize(s, ln) {
 // A compiled clue is { f(D) → true | false | null, say, scope }.
 // D holds one bitmask per variable (v = category*N + item): the rows that item may still be in.
 // f answers "true"/"false" only when that is certain for every row still allowed, otherwise null.
-function compileClue(text, C, ln) {
+function compileClue(text, C, ln, defaultUnit = null) {
+  const distance = text.match(/^\s*(.+?)\s+(?:apart|~)\s+(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*$/i);
+  if (distance) {
+    const [, left, right, amount] = distance;
+    text = `(${left} = ${right} + ${amount}) or (${left} = ${right} - ${amount})`;
+  }
+  const within = text.match(/^\s*(.+?)\s+within\s+(\d+(?:\.\d+)?)\s+of\s+(.+?)\s*$/i);
+  if (within) {
+    const [, left, amount, right] = within;
+    text = `(${left} = ${right} + ${amount}) or (${left} = ${right} - ${amount}) or (${left} = ${right})`;
+  }
+  const countMatch = text.match(/^(exactly|atleast|atmost|(\d+)([+-])?)\s+(\d+)?\s*of\s*\((.*)\)\s*$/i);
+  if (countMatch) {
+    const mode = countMatch[1].toLowerCase(), n = +(countMatch[2] || countMatch[4] || 0), body = countMatch[5];
+    const parts = body.split(/\s*,\s*/).filter(Boolean);
+    if (n < 0 || n > parts.length) throw new E(`Count ${n} is outside 0..${parts.length}`, ln);
+    const fs = parts.map(x => compileClue(x, C, ln, defaultUnit));
+    return { f: D => {
+      const vals = fs.map(x => x.f(D)); let t = vals.filter(x => x === true).length, u = vals.filter(x => x === null).length;
+      const lo = t, hi = t + u;
+      return mode === 'exactly' || /^\d+$/.test(countMatch[1]) ? (n < lo || n > hi ? false : lo === hi ? true : null)
+        : mode === 'atleast' || countMatch[3] === '+' ? (hi < n ? false : lo >= n ? true : null)
+          : (lo > n ? false : hi <= n ? true : null);
+    }, say: `${mode} ${n} of ${parts.length} statements`, scope: [...new Set(fs.flatMap(x => x.scope))] };
+  }
+  // Long order words are deliberately lowered to the legacy chain evaluator.
+  text = text.replace(/\bright\s+before\b/gi, 'then').replace(/\bright\s+after\b/gi, '__AFTER__')
+    .replace(/\bbefore\b/gi, 'then+').replace(/\bafter\b/gi, 'after+').replace(/__AFTER__/g, 'after');
   const N = C[0].items.length;
   const T = tokenize(text, ln); let p = 0;
   const peek = () => T[p], nx = () => T[p++], lw = () => (T[p] || '').toLowerCase();
@@ -120,9 +196,10 @@ function compileClue(text, C, ln) {
   const scope = [];
   const addVar = (c, i) => { if (c > 0) scope.push(c * N + i); };
   const addCat = c => { if (c > 0) for (let i = 0; i < N; i++) scope.push(c * N + i); };
-  const nums = C.map((c, i) => c.num ? i : -1).filter(i => i >= 0);
+  const nums = C.map((c, i) => c.num || c.ordered ? i : -1).filter(i => i >= 0);
   const defNC = h => {
     if (h != null) return h;
+    if (defaultUnit != null) return defaultUnit;
     if (nums.length === 1) return nums[0];
     if (!nums.length) fail('No numeric category to do arithmetic on');
     fail(`Which unit? Options: ${nums.map(i => `${C[i].name} [${C[i].tag}]`).join(', ')}. Write e.g. 500${C[nums[0]].tag} or ${C[nums[0]].tag} of X`);
@@ -134,39 +211,70 @@ function compileClue(text, C, ln) {
     if (t.vs) return t.vs;
     addCat(nc);
     const items = C[nc].items, r = t.row;
-    return D => { const m = r(D), o = []; for (let x = 0; x < N; x++) if (D[nc * N + x] & m) o.push(items[x]); return o; };
+    return D => { const m = r(D), o = []; for (let x = 0; x < N; x++) if (D[nc * N + x] & m) o.push(C[nc].ordered && !C[nc].num ? x + 1 : items[x]); return o; };
   };
   const vsay = (t, nc) => t.k !== undefined ? t.sv : t.vs ? t.say : `${C[nc].name} of ${t.base || t.say}`;
 
-  function entity(w) {
-    const tag = w.slice(-1), name = w.slice(0, -1), c = C.findIndex(x => x.tag === tag);
-    if (c >= 0 && !C[c].num) {
-      const i = C[c].items.indexOf(name);
-      if (i >= 0) { addVar(c, i); return { row: D => D[c * N + i], cat: c, idx: i, nc: null, say: `${C[c].name} ${name}` }; }
+  const findCat = w => C.findIndex(x => x.tag.toLowerCase() === String(w).toLowerCase() || x.name.toLowerCase() === String(w).toLowerCase());
+  const findItem = (c, w) => {
+    const q = String(w).toLowerCase();
+    let i = C[c].items.findIndex(x => String(x).toLowerCase() === q);
+    if (i < 0 && C[c].aliases) {
+      const a = C[c].aliases.get(q);
+      if (a != null) i = C[c].items.findIndex(x => String(x).toLowerCase() === String(a).toLowerCase());
     }
-    const hit = C.find(x => !x.num && x.items.includes(w));
-    if (hit) fail(`"${w}" is missing its tag. Did you mean "${w}${hit.tag}"?`);
-    if (c < 0) fail(`Unknown word "${w}" (tag "${tag}" is not declared)`);
-    fail(`"${name}" is not an item of ${C[c].name} [${tag}]. Options: ${C[c].items.join(', ')}`);
+    return i;
+  };
+  const itemAny = w => C.some((cc, ci) => !cc.num && findItem(ci, w) >= 0);
+  function entity(w) {
+    const parts = String(w).split('.');
+    if (parts.length > 1) {
+      const base = entity(parts.shift()), cat = findCat(parts.join('.'));
+      if (cat < 0) fail(`Unknown category "${parts.join('.')}"`);
+      return { ...base, nc: C[cat].num || C[cat].ordered ? cat : base.nc, say: `the ${C[cat].name} of ${base.say}` };
+    }
+    const exact = [], suffix = [];
+    C.forEach((cc, ci) => {
+      if (cc.num) return;
+      const i = findItem(ci, w); if (i >= 0) exact.push([ci, i]);
+      if (w.length > cc.tag.length && w.slice(-cc.tag.length) === cc.tag) {
+        const j = findItem(ci, w.slice(0, -cc.tag.length)); if (j >= 0) suffix.push([ci, j]);
+      }
+    });
+    const hits = exact.length ? exact : suffix;
+    if (hits.length > 1) fail(`Ambiguous "${w}": ${hits.map(([ci, i]) => `${C[ci].items[i]}${C[ci].tag}`).join(', ')}. Use a category suffix (for example ${C[hits[0][0]].items[hits[0][1]]}.${C[hits[0][0]].tag})`);
+    if (hits.length === 1) {
+        const [c, i] = hits[0]; addVar(c, i);
+        return { row: D => D[c * N + i], cat: c, idx: i, nc: C[c].num || C[c].ordered ? c : null, say: `${C[c].name} ${C[c].items[i]}` };
+    }
+    const cat = findCat(w);
+    if (cat >= 0) fail(`"${w}" is a category; use "${C[cat].tag} of X"`);
+    fail(`Unknown word "${w}"`);
   }
   function prim() {
     const t = nx();
     if (t == null) fail('Clue ended early');
+    if (t === '-') {
+      const a = prim();
+      if (a.k !== undefined) return { ...a, k: -a.k, say: String(-a.k), sv: String(-a.k) };
+      if (a.vs) return { ...a, vs: D => a.vs(D).map(x => -x), say: `minus ${a.say}` };
+      fail('Unary minus needs a numeric value');
+    }
     if (t === '(') { const a = arith(); expect(')'); return a.vs ? { ...a, say: `(${a.say})` } : a; }
-    if (/^\d/.test(t)) {
-      const m = t.match(/^(\d+(?:\.\d+)?)([a-z])?$/); if (!m) fail(`Bad number "${t}"`);
+    if (/^-?\d/.test(t)) {
+      const m = t.match(/^(-?\d+(?:\.\d+)?)([a-z]+)?$/); if (!m) fail(`Bad number "${t}"`);
       const v = +m[1];
       if (!m[2]) return { k: v, nc: null, say: String(v), sv: String(v) };
-      const c = C.findIndex(x => x.tag === m[2]);
-      if (c < 0 || !C[c].num) fail(`"${m[2]}" is not a numeric tag`);
-      const i = C[c].items.indexOf(v);
+      const c = findCat(m[2]);
+      if (c < 0 || (!C[c].num && !C[c].ordered)) fail(`"${m[2]}" is not an order-capable tag`);
+      const i = C[c].num ? C[c].items.indexOf(v) : v - 1;
       if (i < 0) fail(`${v} is not a value of ${C[c].name} (${C[c].items.join(', ')})`);
       addVar(c, i);
       return { k: v, row: D => D[c * N + i], cat: c, idx: i, nc: c, say: `${C[c].name} ${v}`, sv: String(v) };
     }
-    if (KW.has(t.toLowerCase()) || SEQ.includes(t.toLowerCase())) fail(`Unexpected "${t}" here. Statements joined by gates need parentheses`);
+    if ((KW.has(t.toLowerCase()) && !itemAny(t)) || SEQ.includes(t.toLowerCase())) fail(`Unexpected "${t}" here. Statements joined by gates need parentheses`);
     if (/^[a-z]$/.test(t)) {
-      const c = C.findIndex(x => x.tag === t);
+      const c = findCat(t);
       if (c < 0) fail(`Unknown tag "${t}"`);
       if (lw() !== 'of') fail(`Tag "${t}" alone means a category; use "${t} of X"`);
       nx(); const q = prim();
@@ -181,8 +289,16 @@ function compileClue(text, C, ln) {
     return entity(t);
   }
   function arith() {
-    const terms = [prim()], ops = [];
-    while (peek() === '+' || peek() === '-') { ops.push(nx()); terms.push(prim()); }
+    const parseMul = () => {
+      const ts = [prim()], os = [];
+      while (peek() === '*' || peek() === '/') { os.push(nx()); ts.push(prim()); }
+      if (!os.length) return ts[0];
+      os.forEach((op, i) => { if (op === '/' && ts[i + 1].k !== undefined && ts[i + 1].k === 0) fail('Division by zero'); });
+      const u = [...new Set(ts.map(t => t.nc).filter(x => x != null))], nc = defNC(u[0]), fs = ts.map(t => valsFn(t, nc));
+      return { nc, vs: D => { let a = fs[0](D); for (let i = 1; i < fs.length; i++) a = [...new Set(a.flatMap(x => fs[i](D).map(y => os[i - 1] === '/' ? (y === 0 ? NaN : x / y) : x * y)).filter(Number.isFinite))]; return a; }, say: ts.map((t, i) => (i ? ` ${os[i - 1]} ` : '') + vsay(t, nc)).join('') };
+    };
+    const terms = [parseMul()], ops = [];
+    while (peek() === '+' || peek() === '-') { ops.push(nx()); terms.push(parseMul()); }
     if (!ops.length) return terms[0];
     const u = [...new Set(terms.map(t => t.nc).filter(x => x != null))];
     if (u.length > 1) fail(`Mixed units in one expression (${u.map(i => C[i].name).join(' and ')})`);
@@ -283,7 +399,7 @@ function compileClue(text, C, ln) {
     const nc = defNC(us[0]), items = C[nc].items, unit = C[nc].name;
     addCat(nc);
     const base = nc * N;
-    const obit = items.map(v => 1 << items.filter(x => x < v).length);   // item index → single-bit mask of its rank
+    const obit = items.map((v, i) => 1 << (C[nc].ordered && !C[nc].num ? i : items.filter(x => x < v).length));   // item index → rank
     const rkFn = t => {
       if (t.k !== undefined) { const r = obit[items.indexOf(t.k)]; return () => r; }
       const rf = t.row;
@@ -781,7 +897,7 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
     const txt = $('src').value, raw = txt.split('\n');
     if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
-    let mode = 0, setup = [], clues = [], done = false;
+    let mode = 0, setup = [], clues = [], done = false, defaultUnit = null;
     for (const x of L) {
       const u = x.t.toUpperCase();
       if (u === 'SETUP') { mode = 1; continue; }
@@ -789,13 +905,20 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
       if (u === 'SOLVE') { done = true; break; }
       const m = x.t.match(/^(THRESHOLD|LISTMAX)\s*=\s*(\d+)$/i);
       if (m) { if (m[1].toUpperCase() === 'THRESHOLD') thr = Math.max(1, +m[2]); else lm = +m[2]; continue; }
+      const du = x.t.match(/^(?:DEFAULT\s+)?UNIT\s*=\s*([A-Za-z][A-Za-z0-9_]*)$/i);
+      if (du) { defaultUnit = du[1].toLowerCase(); continue; }
       if (mode === 1) setup.push(x); else if (mode === 2) clues.push(x); else throw new E('Begin with SETUP', x.n);
     }
     setTags(thr, lm);
     if (mode < 2) throw new E('Missing START');
     if (!setup.length) throw new E('Missing SETUP section');
     const C = parseSetup(setup);
-    const fns = clues.map(c => compileClue(c.t, C, c.n));
+    if (defaultUnit != null) {
+      const ix = C.findIndex(c => c.tag.toLowerCase() === defaultUnit || c.name.toLowerCase() === defaultUnit);
+      if (ix < 0) throw new E(`Unknown default unit "${defaultUnit}"`, 1);
+      defaultUnit = ix;
+    }
+    const fns = clues.map(c => compileClue(c.t, C, c.n, defaultUnit));
     TIPS = fns.map(f => f.say);
     const R = makeSolver(C, fns, lm);
     const nm = (c, i) => C[c].items[i] + C[c].tag, N = C[0].items.length;
