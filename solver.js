@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor'.split(' '));
+const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then'.split(' '));
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
 const CMP = ['=', '!=', '<', '>'];
 class E extends Error { constructor(m, l) { super(m); this.line = l; } }
@@ -59,7 +59,7 @@ function parseSetup(L) {
 
 /* ───────── CLUES ───────── */
 function tokenize(s, ln) {
-  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|[A-Za-z0-9_.]+)/y;
+  const T = [], re = /\s*(<=>|=>|!=|[=<>+\-()]|\d*\?|[A-Za-z0-9_.]+)/y;
   let m, last = 0;
   while ((m = re.exec(s))) { T.push(m[1]); last = re.lastIndex; }
   if (s.slice(last).trim()) throw new E(`Unexpected character "${s.slice(last).trim()[0]}"`, ln);
@@ -150,8 +150,36 @@ function compileClue(text, C, ln) {
     const fs = m > 1 ? L.terms.map(a => cmp1(a, R.terms[0], op)) : R.terms.map(b => cmp1(L.terms[0], b, op));
     return S => fold(j, fs.map(f => f(S)));
   }
+  const hasThen = () => { let d = 0; for (let i = p; i < T.length; i++) { const t = T[i].toLowerCase(); if (t === '(') d++; else if (t === ')') { if (--d < 0) return false; } else if (!d) { if (t === 'then') return true; if (GATES.includes(t) || t === '=>' || t === '<=>') return false; } } return false; };
+  function seq() {
+    const el = () => {
+      if (/^\d*\?$/.test(peek())) { const t = nx(), k = t === '?' ? 1 : +t.slice(0, -1); if (k < 1) fail('Placeholder count must be at least 1'); return { k }; }
+      const g = [arith()];
+      while (peek() != null && lw() !== 'then' && !GATES.includes(lw()) && ![')', '=>', '<=>', ...CMP].includes(peek())) g.push(arith());
+      return { g };
+    };
+    const E_ = [el()];
+    while (lw() === 'then') { nx(); E_.push(el()); }
+    if (E_.length < 2) fail('"then" needs something on both sides');
+    const gs = E_.flatMap(e => e.g || []);
+    if (gs.some(t => !t.row)) fail('"then" works on entities / number+tag values, not arithmetic');
+    const nc = defNC(gs.map(t => t.nc).find(x => x != null)), N = C[0].items.length;
+    const ord = C[nc].items.map(v => C[nc].items.filter(x => x < v).length);
+    const rk = (t, S) => ord[S.inv[nc][t.row(S)]];
+    const st = (e, S) => Math.min(...e.g.map(t => rk(t, S))), en = (e, S) => Math.max(...e.g.map(t => rk(t, S)));
+    const cons = []; let pg = null, gap = 0;
+    for (const e of E_) {
+      if (e.k) { gap += e.k; continue; }
+      const a = pg, k = gap;
+      if (a) cons.push(S => st(e, S) === en(a, S) + 1 + k); else if (k) cons.push(S => st(e, S) >= k);
+      pg = e; gap = 0;
+    }
+    if (gap) { const a = pg, k = gap; cons.push(S => en(a, S) <= N - 1 - k); }
+    return S => cons.every(f => f(S));
+  }
   function stmt() {
     if (lw() === 'not') { nx(); const f = stmt(); return S => !f(S); }
+    if (hasThen()) return seq();
     if (peek() === '(') {
       const save = p; let err;
       try { nx(); const f = top(); expect(')'); if (!CMP.includes(peek())) return f; } catch (e) { err = e; }
@@ -218,12 +246,14 @@ Wd = 1000g or Eb
 THRESHOLD = 1
 SOLVE`;
 
-function run() {
+function run(force) {
   const out = $('out');
   let thr = 1, lm = 50;
   try {
     const L = [];
-    $('src').value.split('\n').forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
+    const txt = $('src').value, raw = txt.split('\n');
+    if (!force && !txt.endsWith('\n')) raw.pop(); // live mode waits for Enter
+    raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
     let mode = 0, setup = [], clues = [], done = false;
     for (const x of L) {
       const u = x.t.toUpperCase();
@@ -235,11 +265,11 @@ function run() {
       if (mode === 1) setup.push(x); else if (mode === 2) clues.push(x); else throw new E('Begin with SETUP', x.n);
     }
     $('tagThr').textContent = 'THRESHOLD ' + thr; $('tagList').textContent = 'LISTMAX ' + lm;
+    if (mode < 2) { if (force) throw new E('Missing START'); return; }
     if (!setup.length) throw new E('Missing SETUP section');
-    if (mode < 2) throw new E('Missing START');
-    if (!clues.length) throw new E('No clues after START');
-    if (!done) throw new E('Missing SOLVE');
     const C = parseSetup(setup);
+    let nf = 1; for (let i = 2; i <= C[0].items.length; i++) nf *= i;
+    if (!force && clues.length && Math.pow(nf, C.length - 1) > 4e5) { out.innerHTML = '<div class="warn-banner">Large grid: auto-update paused. Press Solve.</div>'; return; }
     const fns = clues.map(c => compileClue(c.t, C, c.n));
     const R = solve(C, fns, lm);
     const nm = (c, i) => C[c].items[i] + C[c].tag, N = C[0].items.length;
@@ -268,7 +298,9 @@ function run() {
 }
 
 $('src').value = EX;
-$('run').onclick = run;
+$('run').onclick = () => run(true);
+let tm; $('src').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => run(false), 250); });
 $('ex').onclick = () => { $('src').value = EX; };
 $('clr').onclick = () => { $('src').value = ''; };
-$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(); });
+$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(true); });
+run(true);

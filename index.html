@@ -25,7 +25,7 @@
     <section class="left-panel panel">
       <div class="panel-title">Puzzle</div>
       <textarea id="src" spellcheck="false"></textarea>
-      <button class="btn-primary" id="run">Solve (Ctrl+Enter)</button>
+      <button class="btn-primary" id="run">Update now (Ctrl+Enter)</button>
       <div class="btn-row">
         <button class="btn-ghost" id="ex">Example</button>
         <button class="btn-ghost" id="clr">Clear</button>
@@ -40,6 +40,7 @@
           <div class="placeholder-row"><kbd>Wd  1000g</kbd><span>Entity name + tag, or number + tag.</span></div>
           <div class="placeholder-row"><kbd>b of Id</kbd><span>The b-entity linked to Id. Arithmetic: <code>Bb - 500 = Db</code>.</span></div>
           <div class="placeholder-row"><kbd>= != &lt; &gt;</kbd><span><code>or xor and nand nor xnor</code> between values distribute: <code>Wd = 1000g or Eb</code>. Between statements, use parentheses; also <code>not</code>, <code>=&gt;</code>, <code>&lt;=&gt;</code>.</span></div>
+          <div class="placeholder-row"><kbd>Id then ? then Od</kbd><span>Order by the numeric category: <code>then</code> = immediately after, <code>?</code> = one unknown slot, <code>3?</code> = three. <code>Id Od then ?</code>: a loose group (any order, not necessarily adjacent), then the next slot.</span></div>
           <div class="placeholder-row"><kbd>THRESHOLD = n</kbd><span>Stop when ≤ n possibilities remain. <code>LISTMAX = n</code> lists them when ≤ n.</span></div>
         </div>
       </div>
