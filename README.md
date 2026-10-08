@@ -40,7 +40,7 @@ THRESHOLD = 1
 | `= != < >` | Compare; numbers work with `+` and `-`: `Bb - 500 = Db` |
 | `or xor and nand nor xnor` | Gates. Between values they distribute (`Wd = 1000g or Eb`); between statements use parentheses: `(A = B) xor (C = D)` |
 | `not`, `=>`, `<=>` | Negation, if-then, if-and-only-if |
-| `A and B = C and D` | Unordered pairing |
+| `A and B = C and D` (or `A B = C D`) | Unordered pairing; a space between values means `and` |
 | `A then B` | B is immediately after A in the numeric order |
 | `A then ? then B` | One unknown slot between; `3?` means three |
 | `A B then ?` | Loose group (any order, not necessarily adjacent), then the next slot |

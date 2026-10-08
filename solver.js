@@ -123,7 +123,12 @@ function compileClue(text, C, ln) {
   }
   function vals() {
     const terms = [arith()]; let j = null;
-    while (GATES.includes(lw())) { const g = nx().toLowerCase(); if (j && g !== j) fail('Mixing different gates needs parentheses'); j = g; terms.push(arith()); }
+    const more = () => peek() != null && ![')', '=>', '<=>', ...CMP].includes(peek()) && lw() !== 'then' && lw() !== 'then+';
+    while (more()) { // a space between values means "and"
+      const g = GATES.includes(lw()) ? nx().toLowerCase() : 'and';
+      if (j && g !== j) fail('Mixing different gates needs parentheses');
+      j = g; terms.push(arith());
+    }
     return { terms, j };
   }
   function cmp1(a, b, op) {

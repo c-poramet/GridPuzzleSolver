@@ -54,7 +54,7 @@ clue       := chain [ ("=>" | "<=>") chain ]
 chain      := stmt ( GATE stmt )*       same GATE throughout; mixing needs parens
 stmt       := "not" stmt | "(" clue ")" | order | comparison
 comparison := values CMP values
-values     := term ( GATE term )*       same GATE throughout
+values     := term ( [GATE] term )*     same GATE throughout; no GATE = "and"
 term       := prim ( ("+"|"-") prim )*  left to right, no * / or unary minus
 prim       := ENTITY | NUMBER[unit] | tag "of" prim | "(" term ")"
 order      := slot ( ("then" | "then+") slot )+     see ORDER below
@@ -77,7 +77,8 @@ value list. To join two statements parenthesize each:
 - GATES: or = at least one; xor = exactly one; and = all; nor = none; nand = not
   all; xnor = zero or all.
 - Set pairing: "A and B = C and D" (only "=", only "and", equal length) means
-  {A,B} equals {C,D} in some order.
+  {A,B} equals {C,D} in some order. A space between values means "and", so
+  "A B = C D" is identical and shorter (prefer it).
 
 # ORDER ("then") - numeric order, ascending by the numeric category's value
 - "A then B": B is IMMEDIATELY after A (next slot up).
