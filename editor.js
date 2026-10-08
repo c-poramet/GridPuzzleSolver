@@ -45,7 +45,7 @@ function numericVals(tokens, N) {
   return { vals: a, labels: a.map(fmtNum) };
 }
 
-const LEX = /(\s+)|(<=>|=>|!=|<=|>=|[=<>+\-*\/~])|([(){}\[\],:])|([tT][hH][eE][nN]\+)|(\.\.\.?|\.\.)|(\d*\?)|("(?:\\"|[^"])*"|'s\b|\.?[A-Za-z_][A-Za-z0-9_.']*|\.?\d+(?:\.\d+)?)|(.)/g;
+const LEX = /(\s+)|(<=>|=>|!=|<=|>=|[=<>+\-*\/~])|([(){}\[\],:])|([tT][hH][eE][nN]\+)|(\.\.\.?|\.\.)|(\d*\?)|("(?:\\"|[^"])*"|'s\b|\.?[A-Za-z_][A-Za-z0-9_.']*|\.?\d+(?:\.\d+)?[A-Za-z]+|\.?\d+(?:\.\d+)?)|(.)/g;
 function lex(code) {
   const out = []; let m; LEX.lastIndex = 0;
   while ((m = LEX.exec(code))) {
