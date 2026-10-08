@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Grid Solver</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="header">
+  <span class="header-title">Grid Solver</span>
+  <span class="header-dot"></span>
+  <span class="header-sub">logic-grid language</span>
+  <div class="header-tags">
+    <span class="setting-tag" id="tagThr">THRESHOLD 1</span>
+    <span class="setting-tag" id="tagList">LISTMAX 50</span>
+  </div>
+  <span class="count-badge" id="badge">— left</span>
+</header>
+
+<main class="main">
+  <div class="solver-layout">
+    <section class="left-panel panel">
+      <div class="panel-title">Puzzle</div>
+      <textarea id="src" spellcheck="false"></textarea>
+      <button class="btn-primary" id="run">Solve (Ctrl+Enter)</button>
+      <div class="btn-row">
+        <button class="btn-ghost" id="ex">Example</button>
+        <button class="btn-ghost" id="clr">Clear</button>
+      </div>
+    </section>
+
+    <section class="right-panel panel" id="out">
+      <div class="placeholder-state">
+        <div class="placeholder-badge">SETUP → START → SOLVE</div>
+        <div class="placeholder-section">
+          <div class="placeholder-row"><kbd>name [t] …</kbd><span>Category with a one-letter lowercase tag. <code>250 500 ...</code> continues the step, <code>... 750 1000</code> backfills, <code>250 ... 1000</code> fills between.</span></div>
+          <div class="placeholder-row"><kbd>Wd  1000g</kbd><span>Entity name + tag, or number + tag.</span></div>
+          <div class="placeholder-row"><kbd>b of Id</kbd><span>The b-entity linked to Id. Arithmetic: <code>Bb - 500 = Db</code>.</span></div>
+          <div class="placeholder-row"><kbd>= != &lt; &gt;</kbd><span><code>or xor and nand nor xnor</code> between values distribute: <code>Wd = 1000g or Eb</code>. Between statements, use parentheses; also <code>not</code>, <code>=&gt;</code>, <code>&lt;=&gt;</code>.</span></div>
+          <div class="placeholder-row"><kbd>THRESHOLD = n</kbd><span>Stop when ≤ n possibilities remain. <code>LISTMAX = n</code> lists them when ≤ n.</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="footer"><span class="footer-credit">Grid Solver · 2026</span></footer>
+<script src="solver.js"></script>
+</body>
+</html>
