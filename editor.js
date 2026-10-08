@@ -202,6 +202,7 @@ function analyze(text) {
 /* ───────── state + metrics ───────── */
 let A = analyze(ta.value);
 let lh = 21, padX = 14, padY = 12, cw = 8;
+let wrap = false, tops = [], hts = []; // per-line top/height (px, relative to the text area padding)
 let err = null, peekLine = null, flashLine = null, internal = false;
 
 function measure() {
@@ -257,9 +258,43 @@ function paint() {
   const bm = bracketMatch(), c = caret();
   hl.innerHTML = A.lines.map((L, i) => `<div class="ln">${L.toks.map(t => tokHtml(t, i, bm)).join('')}</div>`).join('');
   root.style.setProperty('--gd', Math.max(2, String(A.lines.length).length));
+  layoutLines();
   gut.innerHTML = A.lines.map((L, i) =>
-    `<div class="gn${i === c.line ? ' cur' : ''}${L.issues.length ? ' warn' : ''}${err && err.line === i ? ' err' : ''}">${i + 1}</div>`).join('');
+    `<div class="gn${i === c.line ? ' cur' : ''}${L.issues.length ? ' warn' : ''}${err && err.line === i ? ' err' : ''}"${wrap ? ` style="height:${hts[i]}px"` : ''}>${i + 1}</div>`).join('');
   sync();
+}
+
+// measure where every source line starts; with word wrap a line can span several rows
+function layoutLines() {
+  const n = A.lines.length;
+  tops = new Array(n); hts = new Array(n);
+  const w0 = ta.clientWidth;
+  if (!wrap || !w0) {
+    hl.style.width = '';
+    for (let i = 0; i < n; i++) { tops[i] = i * lh; hts[i] = lh; }
+    return;
+  }
+  for (let pass = 0; pass < 2; pass++) { // 2nd pass: a scrollbar appearing narrows the text area
+    const w = ta.clientWidth;
+    hl.style.width = w + 'px';
+    const rows = hl.children; let y = 0;
+    for (let i = 0; i < n; i++) { const h = Math.max(lh, rows[i].offsetHeight); tops[i] = y; hts[i] = h; y += h; }
+    if (ta.clientWidth === w) break;
+  }
+}
+
+// caret position (px, inside the text area padding box) under word wrap
+let meas = null;
+function wrapXY(pos) {
+  if (!meas) {
+    meas = document.createElement('div');
+    meas.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:break-word;font:inherit;letter-spacing:normal;tab-size:2;padding:0;border:0;margin:0';
+    root.appendChild(meas);
+  }
+  meas.style.width = Math.max(0, ta.clientWidth - 2 * padX) + 'px';
+  meas.textContent = ta.value.slice(0, pos);
+  const m = document.createElement('span'); m.textContent = '\u200b'; meas.appendChild(m);
+  return { x: m.offsetLeft, y: m.offsetTop };
 }
 
 let bPeek, bErr, bFlash, bCur;
@@ -268,8 +303,8 @@ let bPeek, bErr, bFlash, bCur;
   bPeek = mk('peek'); bErr = mk('err'); bFlash = mk('flash'); bCur = mk('cur');
 })();
 const place = (el, line) => {
-  if (line == null) { el.hidden = true; return; }
-  el.hidden = false; el.style.top = (padY + line * lh - ta.scrollTop) + 'px';
+  if (line == null || line >= tops.length) { el.hidden = true; return; }
+  el.hidden = false; el.style.top = (padY + tops[line] - ta.scrollTop) + 'px'; el.style.height = hts[line] + 'px';
 };
 function updateBars() {
   place(bPeek, peekLine); place(bErr, err ? err.line : null); place(bFlash, flashLine);
@@ -476,10 +511,14 @@ function scrollSel() { const r = pop.querySelector('.ac-row.sel'); if (r && r.sc
 function position() {
   if (!ac.open) return;
   const r = ta.getBoundingClientRect(), v = ta.value;
-  const ls = v.lastIndexOf('\n', ac.from - 1) + 1;
-  let li = 0; for (let i = v.indexOf('\n'); i >= 0 && i < ac.from; i = v.indexOf('\n', i + 1)) li++;
-  let col = 0; for (const ch of v.slice(ls, ac.from)) col += ch === '\t' ? 2 - col % 2 : 1;
-  const x0 = r.left + padX + col * cw - ta.scrollLeft, yTop = r.top + padY + li * lh - ta.scrollTop;
+  let x0, yTop;
+  if (wrap) { const q = wrapXY(ac.from); x0 = r.left + padX + q.x; yTop = r.top + padY + q.y - ta.scrollTop; }
+  else {
+    const ls = v.lastIndexOf('\n', ac.from - 1) + 1;
+    let li = 0; for (let i = v.indexOf('\n'); i >= 0 && i < ac.from; i = v.indexOf('\n', i + 1)) li++;
+    let col = 0; for (const ch of v.slice(ls, ac.from)) col += ch === '\t' ? 2 - col % 2 : 1;
+    x0 = r.left + padX + col * cw - ta.scrollLeft; yTop = r.top + padY + li * lh - ta.scrollTop;
+  }
   pop.style.left = '0px'; pop.style.top = '0px';
   const w = pop.offsetWidth, h = pop.offsetHeight;
   let y = yTop + lh + 2; if (y + h > innerHeight - 8) y = yTop - h - 2;
@@ -546,6 +585,7 @@ ta.addEventListener('keydown', e => {
   }
   if (mod && (e.code === 'Space' || e.key === ' ')) { e.preventDefault(); updatePop(true); return; }
   if (mod && e.key === '/') { e.preventDefault(); toggleComment(); return; }
+  if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyZ') { e.preventDefault(); setWrap(!wrap, true); return; }
   if (e.altKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
     e.preventDefault();
     const d = e.key === 'ArrowDown' ? 1 : -1;
@@ -594,7 +634,8 @@ legend.addEventListener('click', e => { const b = e.target.closest('.legend-chip
 gutter.addEventListener('mousedown', e => {
   e.preventDefault();
   const r = gutter.getBoundingClientRect();
-  const idx = Math.max(0, Math.min(A.lines.length - 1, Math.floor((e.clientY - r.top - padY + ta.scrollTop) / lh)));
+  const yy = e.clientY - r.top - padY + ta.scrollTop;
+  let idx = 0; for (let i = 0; i < tops.length && tops[i] <= yy; i++) idx = i;
   const [s, en] = lineBounds(idx);
   ta.focus(); ta.setSelectionRange(s, en);
 });
@@ -612,8 +653,23 @@ if (cp) cp.addEventListener('click', async () => {
   const t = cp.textContent; cp.textContent = 'Copied'; setTimeout(() => { cp.textContent = t; }, 1100);
 });
 
+/* ───────── word wrap ───────── */
+const WRAP_KEY = 'gridsolver.wrap', wrapBtn = $('wrapBtn');
+function setWrap(on, save) {
+  wrap = !!on;
+  root.classList.toggle('wrap', wrap);
+  ta.wrap = wrap ? 'soft' : 'off';
+  if (wrapBtn) wrapBtn.setAttribute('aria-pressed', String(wrap));
+  if (wrap) ta.scrollLeft = 0;
+  if (save) { try { localStorage.setItem(WRAP_KEY, wrap ? '1' : '0'); } catch (e) {} }
+  paint(); status(); if (ac.open) position();
+}
+if (wrapBtn) wrapBtn.addEventListener('click', () => { setWrap(!wrap, true); ta.focus(); });
+
 /* ───────── public API for solver.js ───────── */
 window.GSEditor = {
+  PALETTE,
+  setWrap,
   refresh() { measure(); refresh(); },
   setText(s, toStart) {
     replace(0, ta.value.length, s);
@@ -626,13 +682,16 @@ window.GSEditor = {
     const idx = line - 1; if (!(idx >= 0)) return;
     const [, en] = lineBounds(idx);
     ta.focus({ preventScroll: true }); ta.setSelectionRange(en, en);
-    const y = padY + idx * lh;
-    if (y < ta.scrollTop || y + lh > ta.scrollTop + ta.clientHeight) ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
+    const y = padY + (tops[idx] ?? idx * lh), h = hts[idx] ?? lh;
+    if (y < ta.scrollTop || y + h > ta.scrollTop + ta.clientHeight) ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
     ta.scrollLeft = 0; flashLine = idx; sync();
     if (bFlash.animate) bFlash.animate([{ background: 'rgba(201,127,80,.38)' }, { background: 'rgba(201,127,80,0)' }], { duration: 900, easing: 'ease-out' });
   }
 };
 
 measure();
+let wrapSaved = null; try { wrapSaved = localStorage.getItem(WRAP_KEY); } catch (e) {}
+wrap = wrapSaved === '1';
+setWrap(wrap, false);
 refresh();
 })();

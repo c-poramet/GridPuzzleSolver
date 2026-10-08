@@ -252,14 +252,99 @@ Wd = 1000g or Eb
 THRESHOLD = 1
 SOLVE`;
 
+const DEF_THR = 1, DEF_LM = 10;
+const setTags = (t, l) => { $('tagThr').textContent = 'THRESHOLD ' + t; $('tagList').textContent = 'LISTMAX ' + l; };
+
+/* ───────── answer table ───────── */
+// ord.o = category indexes; o[0] is the row category, the rest are columns in display order.
+const ORD_KEY = 'gridsolver.order';
+const FALLBACK_COLORS = ['#6ca965', '#6fa3d0', '#a58bc4', '#d27d8f', '#4fb3b3', '#b8a78a'];
+const catColor = i => { const p = window.GSEditor?.PALETTE || FALLBACK_COLORS; return p[i % p.length]; };
+let ans = null, ord = null;
+
+const sigOf = C => C.map(c => c.name + '[' + c.tag + ']').join('|');
+const saveOrd = () => { try { localStorage.setItem(ORD_KEY, JSON.stringify(ord)); } catch (e) {} };
+function initOrder(C) {
+  const sig = sigOf(C), idx = C.map((_, i) => i);
+  if (ord && ord.sig === sig) return;
+  let o = idx;
+  try {
+    const s = JSON.parse(localStorage.getItem(ORD_KEY));
+    if (s && s.sig === sig && Array.isArray(s.o) && s.o.length === idx.length && [...s.o].sort((a, b) => a - b).join() === idx.join()) o = s.o;
+  } catch (e) {}
+  ord = { sig, o: o.slice() };
+}
+
+// cand(a, x, b): which items of category b can share a row with item x of category a
+function makeCand(C, certain, leaves) {
+  const N = C[0].items.length;
+  if (leaves) return (a, x, b) => { const s = new Set(); for (const L of leaves) s.add(L.inv[b][L.pos[a][x]]); return [...s].sort((p, q) => p - q); };
+  return (a, x, b) => {
+    const r = a === 0 ? x : certain.get(a + '.' + x);
+    if (r === undefined) return [];
+    if (b === 0) return [r];
+    for (let i = 0; i < N; i++) if (certain.get(b + '.' + i) === r) return [i];
+    return [];
+  };
+}
+
+function renderAnswer(focusK) {
+  const box = $('answer');
+  if (!box || !ans || !ord) return;
+  const { C, cand, count } = ans, N = C[0].items.length, rc = ord.o[0], cols = ord.o.slice(1);
+  const sty = c => `--c:${catColor(c)}`;
+  const rowIdx = [...Array(N).keys()];
+  if (C[rc].num) rowIdx.sort((a, b) => C[rc].items[a] - C[rc].items[b]);
+  let unsure = false;
+  const cell = (x, k) => {
+    const v = cand(rc, x, k);
+    if (!v.length) { unsure = true; return '<td class="cell-unk">?</td>'; }
+    if (v.length === 1) return `<td style="${sty(k)}"><span class="cell-v">${esc(C[k].items[v[0]])}</span></td>`;
+    unsure = true;
+    const more = v.length > 3 ? `<span class="cell-more">+${v.length - 3}</span>` : '';
+    return `<td class="cell-amb" style="${sty(k)}">${v.slice(0, 3).map(i => `<span class="cell-v">${esc(C[k].items[i])}</span>`).join('')}${more}</td>`;
+  };
+  const body = rowIdx.map(x => `<tr><th scope="row" style="${sty(rc)}"><span class="cell-v">${esc(C[rc].items[x])}</span></th>${cols.map(k => cell(x, k)).join('')}</tr>`).join('');
+  const head = `<th class="rowhead" style="${sty(rc)}" title="${esc(C[rc].name)} is the row category"><span class="ch-in"><span class="ch-name">${esc(C[rc].name)}</span><span class="ch-tag">[${C[rc].tag}]</span></span></th>` +
+    cols.map((k, p) => `<th class="colhead" draggable="true" tabindex="0" role="button" data-k="${k}" style="${sty(k)}" title="Click: use ${esc(C[k].name)} as the rows · drag to reorder (Alt+←/→)"><span class="ch-in">` +
+      `<button type="button" class="ch-mv" data-d="-1" aria-label="Move ${esc(C[k].name)} left"${p === 0 ? ' disabled' : ''}>‹</button>` +
+      `<span class="ch-name">${esc(C[k].name)}</span><span class="ch-tag">[${C[k].tag}]</span>` +
+      `<button type="button" class="ch-mv" data-d="1" aria-label="Move ${esc(C[k].name)} right"${p === cols.length - 1 ? ' disabled' : ''}>›</button></span></th>`).join('');
+  box.hidden = false;
+  box.innerHTML = `<div class="answer-head"><span class="answer-title${count === 1 ? '' : ' part'}">${count === 1 ? 'Solution' : `${count.toLocaleString()} possibilities left`}</span>` +
+    `<span class="answer-hint">Click a header to use it as rows · drag or ‹ › to reorder</span></div>` +
+    `<div class="answer-scroll"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
+    (unsure ? '<div class="answer-note"><b>?</b> not determined yet · several names = still possible</div>' : '');
+  if (focusK != null) box.querySelector(`.colhead[data-k="${focusK}"]`)?.focus();
+}
+
+const useAsRows = (k, focus) => {
+  const i = ord.o.indexOf(k); if (i < 1) return;
+  const old = ord.o[0]; ord.o[0] = k; ord.o[i] = old;
+  saveOrd(); renderAnswer(focus ? old : null);
+};
+const moveCol = (k, d, focus) => {
+  const cols = ord.o.slice(1), i = cols.indexOf(k), j = i + d;
+  if (i < 0 || j < 0 || j >= cols.length) return;
+  [cols[i], cols[j]] = [cols[j], cols[i]];
+  ord.o = [ord.o[0], ...cols]; saveOrd(); renderAnswer(focus ? k : null);
+};
+const placeCol = (k, target, after) => {
+  const cols = ord.o.slice(1).filter(c => c !== k);
+  cols.splice(cols.indexOf(target) + (after ? 1 : 0), 0, k);
+  ord.o = [ord.o[0], ...cols]; saveOrd(); renderAnswer();
+};
+
+/* ───────── run ───────── */
 function run(force) {
   const out = $('out');
-  let thr = 1, lm = 10;
+  let thr = DEF_THR, lm = DEF_LM;
+  ans = null;
   window.GSEditor?.setError(null);
   try {
     const L = [];
     const txt = $('src').value, raw = txt.split('\n');
-    if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; $('tagThr').textContent = 'THRESHOLD 1'; $('tagList').textContent = 'LISTMAX 50'; return; }
+    if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
     if (!force && !txt.endsWith('\n')) raw.pop(); // live mode waits for Enter
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
     let mode = 0, setup = [], clues = [], done = false;
@@ -272,12 +357,12 @@ function run(force) {
       if (m) { if (m[1].toUpperCase() === 'THRESHOLD') thr = Math.max(1, +m[2]); else lm = +m[2]; continue; }
       if (mode === 1) setup.push(x); else if (mode === 2) clues.push(x); else throw new E('Begin with SETUP', x.n);
     }
-    $('tagThr').textContent = 'THRESHOLD ' + thr; $('tagList').textContent = 'LISTMAX ' + lm;
+    setTags(thr, lm);
     if (mode < 2) { if (force) throw new E('Missing START'); return; }
     if (!setup.length) throw new E('Missing SETUP section');
     const C = parseSetup(setup);
     let nf = 1; for (let i = 2; i <= C[0].items.length; i++) nf *= i;
-    if (!force && clues.length && Math.pow(nf, C.length - 1) > 4e5) { out.innerHTML = '<div class="warn-banner">Large grid: auto-update paused. Press Solve.</div>'; return; }
+    if (!force && clues.length && Math.pow(nf, C.length - 1) > 4e5) { out.innerHTML = '<div class="warn-banner">Large grid: auto-update paused. Press Update now (Ctrl+Enter).</div>'; return; }
     const fns = clues.map(c => compileClue(c.t, C, c.n));
     const R = solve(C, fns, lm);
     const nm = (c, i) => C[c].items[i] + C[c].tag, N = C[0].items.length;
@@ -296,8 +381,15 @@ function run(force) {
     }
     if (!stop) html += `<div class="warn-banner">${last.toLocaleString()} possibilities remain after all clues (threshold ${thr}).</div>`;
     h += `<div class="stat-chip green"><span class="stat-val">${last.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div><div class="stat-chip accent"><span class="stat-val">${clues.length}</span><span class="stat-lbl">Clues</span></div></div>`;
-    out.innerHTML = h + html;
+    out.innerHTML = h + html + '<div class="answer" id="answer" hidden></div>';
     $('badge').textContent = last.toLocaleString() + ' left';
+
+    // answer table: shown once the clues give a result (unique solution, or the best picture so far)
+    if (clues.length && last > 0) {
+      const endJ = stop || clues.length, certain = R.certain[endJ];
+      const lv = R.jmin !== undefined && R.jmin <= endJ && last <= lm ? R.leaves.filter(s => s.p >= endJ) : null;
+      if (lv || certain.size) { ans = { C, count: last, cand: makeCand(C, certain, lv) }; initOrder(C); renderAnswer(); }
+    }
   } catch (e) {
     if (!(e instanceof E)) throw e;
     window.GSEditor?.setError(e.line, e.message);
@@ -306,19 +398,21 @@ function run(force) {
   }
 }
 
+/* ───────── wiring ───────── */
 const PH = $('out').innerHTML;
 const store = {
   get() { try { return localStorage.getItem('gridsolver.src'); } catch (e) { return null; } },
   set(v) { try { localStorage.setItem('gridsolver.src', v); } catch (e) {} }
 };
 const ED = window.GSEditor;
-const setText = (v, top) => ED ? ED.setText(v, top) : ($('src').value = v);
-$('src').value = store.get() ?? EX;
+const setText = (v, top) => { if (ED) ED.setText(v, top); else $('src').value = v; store.set($('src').value); };
+$('src').value = store.get() ?? EX; // last input is restored; first visit gets the example
 ED?.refresh();
 $('run').onclick = () => run(true);
 let tm; $('src').addEventListener('input', () => { store.set($('src').value); clearTimeout(tm); tm = setTimeout(() => run(false), 250); });
+addEventListener('pagehide', () => store.set($('src').value));
 $('ex').onclick = () => { setText(EX, true); run(true); };
-$('clr').onclick = () => { setText('', true); };
+$('clr').onclick = () => { setText('', true); run(true); };
 $('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(true); });
 
 // steps <-> editor: hover previews the clue line, click jumps to it
@@ -326,4 +420,88 @@ const outEl = $('out');
 outEl.addEventListener('mouseover', e => { const st = e.target.closest('.step'); ED?.peek(st ? +st.dataset.line : null); });
 outEl.addEventListener('mouseleave', () => ED?.peek(null));
 outEl.addEventListener('click', e => { const st = e.target.closest('.step'); if (st && ED) ED.goto(+st.dataset.line); });
+
+// answer table: click header = use as rows, ‹ › or drag = reorder
+outEl.addEventListener('click', e => {
+  if (!ans || !e.target.closest) return;
+  const mv = e.target.closest('.ch-mv');
+  if (mv) { if (!mv.disabled) moveCol(+mv.closest('.colhead').dataset.k, +mv.dataset.d, true); return; }
+  const th = e.target.closest('.colhead');
+  if (th) useAsRows(+th.dataset.k, e.detail === 0);
+});
+outEl.addEventListener('keydown', e => {
+  const th = ans && e.target.classList?.contains('colhead') ? e.target : null; if (!th) return;
+  const k = +th.dataset.k;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); useAsRows(k, true); }
+  else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); moveCol(k, e.key === 'ArrowLeft' ? -1 : 1, true); }
+});
+let dragK = null;
+const clearMarks = () => outEl.querySelectorAll('.drop-before,.drop-after,.dragging').forEach(el => el.classList.remove('drop-before', 'drop-after', 'dragging'));
+const endDrag = () => { dragK = null; clearMarks(); };
+outEl.addEventListener('dragstart', e => {
+  const th = e.target.closest?.('.colhead'); if (!th) return;
+  dragK = +th.dataset.k; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragK));
+  th.classList.add('dragging');
+});
+outEl.addEventListener('dragover', e => {
+  if (dragK == null) return;
+  outEl.querySelectorAll('.drop-before,.drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
+  const th = e.target.closest?.('.colhead'); if (!th || +th.dataset.k === dragK) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const r = th.getBoundingClientRect(); th.classList.add(e.clientX < r.left + r.width / 2 ? 'drop-before' : 'drop-after');
+});
+outEl.addEventListener('drop', e => {
+  if (dragK == null) return;
+  const th = e.target.closest?.('.colhead');
+  if (th && +th.dataset.k !== dragK) { e.preventDefault(); const r = th.getBoundingClientRect(); placeCol(dragK, +th.dataset.k, e.clientX >= r.left + r.width / 2); }
+  endDrag();
+});
+outEl.addEventListener('dragend', endDrag);
+outEl.addEventListener('dragleave', e => { if (!outEl.contains(e.relatedTarget)) outEl.querySelectorAll('.drop-before,.drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after')); });
+
+/* ───────── resizable panels (left : right = 2 : 1 by default, remembered) ───────── */
+const layout = $('layout'), split = $('split');
+const SPLIT_KEY = 'gridsolver.split', SPLIT_DEF = 2 / 3, SPLIT_MIN = 240; // min width in px of each panel
+let pref = SPLIT_DEF;
+try { const v = parseFloat(localStorage.getItem(SPLIT_KEY)); if (v > 0 && v < 1) pref = v; } catch (e) {}
+const clampSplit = r => {
+  const w = layout.clientWidth - split.offsetWidth;
+  if (w <= SPLIT_MIN * 2) return 0.5;
+  return Math.min(1 - SPLIT_MIN / w, Math.max(SPLIT_MIN / w, r));
+};
+const applySplit = save => {
+  const r = clampSplit(pref);
+  layout.style.setProperty('--split', r);
+  split.setAttribute('aria-valuenow', Math.round(r * 100));
+  if (save) { try { localStorage.setItem(SPLIT_KEY, String(pref)); } catch (e) {} }
+};
+let grab = null;
+split.addEventListener('pointerdown', e => {
+  if (e.button) return;
+  e.preventDefault();
+  const sr = split.getBoundingClientRect();
+  grab = e.clientX - (sr.left + sr.width / 2);
+  split.setPointerCapture(e.pointerId);
+  document.body.classList.add('resizing');
+});
+split.addEventListener('pointermove', e => {
+  if (grab == null) return;
+  const lr = layout.getBoundingClientRect(), sw = split.offsetWidth;
+  pref = clampSplit((e.clientX - grab - lr.left - sw / 2) / (lr.width - sw));
+  applySplit(false);
+});
+const endResize = () => { if (grab == null) return; grab = null; document.body.classList.remove('resizing'); applySplit(true); };
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => split.addEventListener(ev, endResize));
+split.addEventListener('dblclick', () => { pref = SPLIT_DEF; applySplit(true); });
+split.addEventListener('keydown', e => {
+  const step = e.shiftKey ? 0.1 : 0.02;
+  if (e.key === 'ArrowLeft') pref = clampSplit(pref) - step;
+  else if (e.key === 'ArrowRight') pref = clampSplit(pref) + step;
+  else if (e.key === 'Home' || e.key === 'Enter') pref = SPLIT_DEF;
+  else return;
+  e.preventDefault(); pref = clampSplit(pref); applySplit(true);
+});
+addEventListener('resize', () => applySplit(false));
+applySplit(false);
+
 run(true);

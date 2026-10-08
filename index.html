@@ -6,6 +6,7 @@
 <title>Grid Solver</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%236fa3d0'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,30 +14,34 @@
   <span class="header-title">Grid Solver</span>
   <span class="header-dot"></span>
   <span class="header-sub">logic-grid language</span>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%236fa3d0'/%3E%3C/svg%3E" />
   <div class="header-tags">
     <span class="setting-tag" id="tagThr">THRESHOLD 1</span>
-    <span class="setting-tag" id="tagList">LISTMAX 50</span>
+    <span class="setting-tag" id="tagList">LISTMAX 10</span>
   </div>
   <span class="count-badge" id="badge">— left</span>
 </header>
 
 <main class="main">
-  <div class="solver-layout">
+  <div class="solver-layout" id="layout">
     <section class="left-panel panel">
       <div class="panel-head">
         <div class="panel-title">Puzzle</div>
-        <button class="title-link" id="kbBtn" type="button" aria-expanded="false" aria-controls="kbPop">Shortcuts</button>
+        <div class="panel-tools">
+          <button class="title-link tog" id="wrapBtn" type="button" aria-pressed="false" title="Word wrap (Alt+Z)">Wrap</button>
+          <button class="title-link" id="kbBtn" type="button" aria-expanded="false" aria-controls="kbPop">Shortcuts</button>
+        </div>
       </div>
       <div class="kb-pop" id="kbPop" hidden>
         <div class="kb-row"><span>Solve now</span><kbd>Ctrl/⌘ Enter</kbd></div>
         <div class="kb-row"><span>Suggestions</span><kbd>Ctrl Space</kbd></div>
         <div class="kb-row"><span>Accept / close suggestion</span><kbd>Tab · Esc</kbd></div>
+        <div class="kb-row"><span>Toggle word wrap</span><kbd>Alt Z</kbd></div>
         <div class="kb-row"><span>Toggle comment</span><kbd>Ctrl/⌘ /</kbd></div>
         <div class="kb-row"><span>Move line</span><kbd>Alt ↑ ↓</kbd></div>
         <div class="kb-row"><span>Duplicate line</span><kbd>Shift Alt ↑ ↓</kbd></div>
         <div class="kb-row"><span>Select a line</span><kbd>click its number</kbd></div>
         <div class="kb-row"><span>Jump to a clue</span><kbd>click its step</kbd></div>
+        <div class="kb-row"><span>Resize panels</span><kbd>drag · ← → · dbl-click resets</kbd></div>
       </div>
       <div class="editor" id="editor">
         <div class="ed-gutter" aria-hidden="true"><div class="ed-gutter-in" id="edGut"></div></div>
@@ -60,6 +65,8 @@
       </div>
     </section>
 
+    <div class="splitter" id="split" role="separator" aria-orientation="vertical" aria-label="Resize panels" aria-valuemin="0" aria-valuemax="100" aria-valuenow="67" tabindex="0" title="Drag to resize · double-click to reset"><span class="splitter-grip"></span></div>
+
     <section class="right-panel panel" id="out">
       <div class="placeholder-state">
         <div class="placeholder-badge">SETUP → START → SOLVE</div>
@@ -69,7 +76,8 @@
           <div class="placeholder-row"><kbd>b of Id</kbd><span>The b-entity linked to Id. Arithmetic: <code>Bb - 500 = Db</code>.</span></div>
           <div class="placeholder-row"><kbd>= != &lt; &gt;</kbd><span><code>or xor and nand nor xnor</code> between values distribute: <code>Wd = 1000g or Eb</code>. Between statements, use parentheses; also <code>not</code>, <code>=&gt;</code>, <code>&lt;=&gt;</code>.</span></div>
           <div class="placeholder-row"><kbd>Id then ? then Od</kbd><span>Order by the numeric category: <code>then</code> = immediately after, <code>?</code> = one unknown slot, <code>3?</code> = three, <code>then+</code> = later with any gap. <code>Id Od then ?</code>: a loose group (any order, not necessarily adjacent), then the next slot.</span></div>
-          <div class="placeholder-row"><kbd>THRESHOLD = n</kbd><span>Stop when ≤ n possibilities remain. <code>LISTMAX = n</code> lists them when ≤ n.</span></div>
+          <div class="placeholder-row"><kbd>Answer table</kbd><span>When the clues give a result, the grid appears below the steps: first category as rows, the others as columns. Click a column header to make it the rows; drag headers (or use <code>‹ ›</code>) to reorder.</span></div>
+          <div class="placeholder-row"><kbd>THRESHOLD = n</kbd><span>Stop when ≤ n possibilities remain (default 1). <code>LISTMAX = n</code> lists them when ≤ n (default 10).</span></div>
         </div>
       </div>
     </section>

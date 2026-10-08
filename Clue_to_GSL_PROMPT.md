@@ -16,15 +16,18 @@ SETUP
 START
 <one clue per line>
 THRESHOLD = n     (optional, default 1: stop when <= n possibilities remain)
-LISTMAX = n       (optional, default 50: list possibilities when <= n remain)
-SOLVE             (optional)
-Comments start with //. Blank lines are fine.
+LISTMAX = n       (optional, default 10: list possibilities when <= n remain)
+SOLVE             (optional; everything after it is ignored)
+THRESHOLD / LISTMAX may appear on any line before SOLVE. Comments start with //.
+Blank lines are fine. Once the clues give a result the site also shows an answer
+table, so no extra output is needed.
 
 # SETUP RULES
 - Tag: exactly ONE lowercase letter, unique per category, mnemonic (genes [g],
   riders [r], color [c]). Tags double as units for numbers (500g).
 - Every category has the same number of items (N). At least one category must list
   all its items; N comes from those.
+- Category names must not be reserved words either (list below).
 - Item names: letters/digits/underscore only, no spaces or punctuation ("Dr. Walsh"
   becomes Walsh). Not a single lowercase letter. Not a reserved word: setup start
   solve threshold listmax proceed of and or xor not nand nor xnor then (checked
@@ -75,7 +78,7 @@ value list. To join two statements parenthesize each:
 - Value lists distribute: X = A or B means (X = A) or (X = B). "and" between one
   value and a list is an ERROR.
 - GATES: or = at least one; xor = exactly one; and = all; nor = none; nand = not
-  all; xnor = zero or all.
+  all; xnor = not exactly one (for two statements: both or neither).
 - Set pairing: "A and B = C and D" (only "=", only "and", equal length) means
   {A,B} equals {C,D} in some order. A space between values means "and", so
   "A B = C D" is identical and shorter (prefer it).
