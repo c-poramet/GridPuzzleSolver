@@ -186,8 +186,10 @@ function compileClue(text, C, ln, defaultUnit = null) {
     }, say: `${mode} ${n} of ${parts.length} statements`, scope: [...new Set(fs.flatMap(x => x.scope))] };
   }
   // Long order words are deliberately lowered to the legacy chain evaluator.
-  text = text.replace(/\bright\s+before\b/gi, 'then').replace(/\bright\s+after\b/gi, '__AFTER__')
-    .replace(/\bbefore\b/gi, 'then+').replace(/\bafter\b/gi, 'after+').replace(/__AFTER__/g, 'after');
+  text = text.replace(/\bthen\+/gi, '__THENPLUS__').replace(/\bafter\+/gi, '__AFTERPLUS__')
+    .replace(/\bright\s+before\b/gi, 'then').replace(/\bright\s+after\b/gi, '__AFTER__')
+    .replace(/\bbefore\b/gi, 'then+').replace(/\bafter\b/gi, 'after+')
+    .replace(/__AFTER__/g, 'after').replace(/__THENPLUS__/g, 'then+').replace(/__AFTERPLUS__/g, 'after+');
   const N = C[0].items.length;
   const T = tokenize(text, ln); let p = 0;
   const peek = () => T[p], nx = () => T[p++], lw = () => (T[p] || '').toLowerCase();

@@ -134,7 +134,7 @@ function initSettings() {
 const SECTION = ['SETUP', 'START', 'SOLVE'];
 const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT', 'ROWS'];
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
-const GATES2 = ['before', 'right', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
+const GATES2 = ['before', 'after', 'right', 'then', 'then+', 'after+', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
 const PREFIX = ['each', 'exactly', 'atleast', 'atmost', 'alldiff', 'allsame', 'total', 'sum', 'avg', 'max', 'min'];
 const MODIFIERS = ['ordered', 'circular', 'unordered'];
 // These words are intentionally recognised contextually.  The current solver
