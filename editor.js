@@ -394,8 +394,7 @@ function analyze(text) {
             const c = tagMap.get(m[2]);
             if (!c || (!c.num && !c.ordered)) { bad(L, t.s, w, `"${m[2]}" is not an order-capable tag`, 't-num'); return; }
             const valid = c.num ? c.valSet.has(+m[1]) : Number.isInteger(+m[1]) && +m[1] >= 1 && +m[1] <= c.items.length;
-            if (!valid) { bad(L, t.s, w, `${m[1]} is not a value of ${c.name} (${c.items.join(', ')})`, 't-num'); return; }
-            tk(L, t.s, w, 't-ent', { style: '--c:' + c.color, parts: [m[1], m[2]] });
+            tk(L, t.s, w, valid ? 't-ent' : 't-num', { style: '--c:' + c.color, parts: [m[1], m[2]] });
             return;
           }
           if (!have) { tk(L, t.s, w, 't-id'); return; }

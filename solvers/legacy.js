@@ -199,11 +199,12 @@ function compileClue(text, C, ln, defaultUnit = null) {
   const addVar = (c, i) => { if (c > 0) scope.push(c * N + i); };
   const addCat = c => { if (c > 0) for (let i = 0; i < N; i++) scope.push(c * N + i); };
   const nums = C.map((c, i) => c.num || c.ordered ? i : -1).filter(i => i >= 0);
-  const defNC = h => {
+  const defNC = (h, deferAmbiguous = false) => {
     if (h != null) return h;
     if (defaultUnit != null) return defaultUnit;
     if (nums.length === 1) return nums[0];
     if (!nums.length) fail('No numeric category to do arithmetic on');
+    if (deferAmbiguous) return null;
     fail(`Which unit? Options: ${nums.map(i => `${C[i].name} [${C[i].tag}]`).join(', ')}. Write e.g. 500${C[nums[0]].tag} or ${C[nums[0]].tag} of X`);
   };
 
@@ -270,7 +271,7 @@ function compileClue(text, C, ln, defaultUnit = null) {
       const c = findCat(m[2]);
       if (c < 0 || (!C[c].num && !C[c].ordered)) fail(`"${m[2]}" is not an order-capable tag`);
       const i = C[c].num ? C[c].items.indexOf(v) : v - 1;
-      if (i < 0) fail(`${v} is not a value of ${C[c].name} (${C[c].items.join(', ')})`);
+      if (i < 0) return { k: v, nc: c, say: `${C[c].name} ${v}`, sv: String(v) };
       addVar(c, i);
       return { k: v, row: D => D[c * N + i], cat: c, idx: i, nc: c, say: `${C[c].name} ${v}`, sv: String(v) };
     }
@@ -304,9 +305,16 @@ function compileClue(text, C, ln, defaultUnit = null) {
     if (!ops.length) return terms[0];
     const u = [...new Set(terms.map(t => t.nc).filter(x => x != null))];
     if (u.length > 1) fail(`Mixed units in one expression (${u.map(i => C[i].name).join(' and ')})`);
-    const nc = defNC(u[0]), g = terms.map(t => valsFn(t, nc));
-    const vs = D => { let a = g[0](D); for (let i = 1; i < g.length; i++) a = comb(a, g[i](D), ops[i - 1] === '+'); return a; };
-    return { nc, vs, say: terms.map((t, i) => (i ? (ops[i - 1] === '+' ? ' plus ' : ' minus ') : '') + vsay(t, nc)).join('') };
+    // Leave an all-entity expression unresolved until its comparison partner
+    // can provide an explicit unit such as `6d` or `10c`.
+    const nc = defNC(u[0], true);
+    const makeVs = unit => {
+      const g = terms.map(t => valsFn(t, unit));
+      return D => { let a = g[0](D); for (let i = 1; i < g.length; i++) a = comb(a, g[i](D), ops[i - 1] === '+'); return a; };
+    };
+    const vs = nc == null ? null : makeVs(nc);
+    const say = terms.map((t, i) => (i ? (ops[i - 1] === '+' ? ' plus ' : ' minus ') : '') + (nc == null ? t.say : vsay(t, nc))).join('');
+    return { nc, vs, makeVs, say };
   }
   function vals() {
     const terms = [arith()]; let j = null;
@@ -322,7 +330,7 @@ function compileClue(text, C, ln, defaultUnit = null) {
     const numeric = op === '<' || op === '>' || !a.row || !b.row;
     if (!numeric) return { f: op === '=' ? D => rowEq(a.row(D), b.row(D)) : D => not3(rowEq(a.row(D), b.row(D))), sa: a.say, sb: b.say, numeric };
     if (a.nc != null && b.nc != null && a.nc !== b.nc) fail(`Mixed units: ${C[a.nc].name} and ${C[b.nc].name}`);
-    const nc = defNC(a.nc ?? b.nc), x = valsFn(a, nc), y = valsFn(b, nc);
+    const nc = defNC(a.nc ?? b.nc), x = a.makeVs ? a.makeVs(nc) : valsFn(a, nc), y = b.makeVs ? b.makeVs(nc) : valsFn(b, nc);
     return { f: D => cmpNum(x(D), y(D), op), sa: vsay(a, nc), sb: vsay(b, nc), numeric };
   }
   function comparison() {
