@@ -177,6 +177,7 @@ function analyze(text) {
   const raw = text.split('\n');
   const lines = raw.map(() => ({ kind: 'blank', mode: 0, toks: [], issues: [] }));
   const cats = [];
+  const master = { declarations: [], guesses: [] };
   let mode = 0;
 
   // pass 1: sections + categories
@@ -187,6 +188,13 @@ function analyze(text) {
     if (u === 'SETUP') { mode = 1; L.kind = 'sec'; L.mode = 1; return; }
     if (u === 'START') { mode = 2; L.kind = 'sec'; L.mode = 2; return; }
     if (u === 'SOLVE') { mode = 3; L.kind = 'sec'; L.mode = 3; return; }
+    const decl = code.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(\d+)\s+slots?\s+from\s+(.+?)(?:\s+(unique|repeat))?$/i);
+    if (decl) {
+      const range = decl[3].match(/^(-?\d+)\s*\.\.\.?\s*(-?\d+)$/);
+      L.kind = 'master-decl'; L.master = { name: decl[1], count: +decl[2], source: decl[3], min: range ? +range[1] : null, max: range ? +range[2] : null, mode: decl[4] || 'repeat', line: i };
+      master.declarations.push(L.master); return;
+    }
+    if (/^(?:GUESS|FEEDBACK|NEXT_MOVE)\b/i.test(code) || /:=/.test(code)) { L.kind = 'master-game'; return; }
     L.mode = mode;
     if (/^(THRESHOLD|LISTMAX)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
     if (mode === 0) { L.kind = 'stray'; return; }
@@ -281,6 +289,40 @@ function analyze(text) {
         tk(L, p + last, rest.slice(last), '');
         break;
       }
+      case 'master-decl': {
+        const m = code.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s+)(\d+)(\s+slots?)(\s+from\s+)(.+?)(?:\s+(unique|repeat))?(\s*)$/i);
+        let p = 0;
+        [[m[1], ''], [m[2], 't-slot'], [m[3], ''], [m[4], 't-num'], [m[5], 't-kw'], [m[6], 't-kw'], [m[7], 't-ent'], [m[8] || '', 't-kw'], [m[9], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
+        const d = L.master;
+        if (d.count < 1 || d.count > 12) bad(L, code.indexOf(m[4]), m[4], 'Slot count must be between 1 and 12', 't-num');
+        if (d.min != null && d.min > d.max) bad(L, code.indexOf(m[7]), m[7], 'Range must ascend from min to max', 't-num');
+        break;
+      }
+      case 'master-game': {
+        tk(L, 0, lead, '');
+        const m = code.match(/^(\s*)(GUESS|FEEDBACK|NEXT_MOVE)\b(.*)$/i);
+        if (!m) {
+          const g = code.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*\s+)?(.+?)\s*(:=)\s*(.*)$/i);
+          if (!g) { bad(L, 0, code, 'Expected a GUESS, FEEDBACK, NEXT_MOVE, or := guess', 't-id'); break; }
+          const name = g[2] || '', guess = g[3], opAt = code.indexOf(':=', g[1].length);
+          if (name) tk(L, g[1].length, name, 't-slot');
+          tk(L, g[1].length + name.length, guess, 't-ent'); tk(L, opAt, ':=', 't-op'); tk(L, opAt + 2, g[5], 't-gate');
+          master.guesses.push(guess); break;
+        }
+        const keyword = m[2].toUpperCase(), rest = m[3], off = m[1].length + m[2].length;
+        tk(L, m[1].length, m[2], keyword === 'NEXT_MOVE' ? 't-sec' : 't-gate');
+        if (!rest.trim()) { bad(L, off, rest, `${keyword} needs a value`, 't-id'); break; }
+        const rr = /\S+/g; let q;
+        while ((q = rr.exec(rest))) {
+          const w = q[0], at = off + q.index;
+          if (/^slot(?:\(\d+\)|\[\d+\])$/i.test(w) || /^slot\d+$/i.test(w)) tk(L, at, w, 't-slot');
+          else if (keyword === 'NEXT_MOVE') tk(L, at, w, 't-sec');
+          else if (keyword === 'FEEDBACK' && /^(?:exact|misplaced|correct|present|absent|black|white|green|yellow|gray|grey|\d+)[,;:]?$/i.test(w)) tk(L, at, w, /^\d/.test(w) ? 't-num' : 't-ent');
+          else if (keyword === 'GUESS' && /^\d+$/.test(w)) tk(L, at, w, 't-ent');
+          else bad(L, at, w, keyword === 'FEEDBACK' ? 'Expected feedback counts or exact/misplaced markers' : `Unexpected ${keyword} value`, 't-id');
+        }
+        break;
+      }
       case 'clue': {
         const toks = lex(code), sig = toks.filter(t => t.k !== 'ws');
         sig.forEach((t, j) => { t.prev = sig[j - 1]; t.next = sig[j + 1]; });
@@ -296,6 +338,10 @@ function analyze(text) {
             case 'other': bad(L, t.s, t.t, `Unexpected character "${t.t}"`, 't-id'); return;
           }
           const w = t.t, lw = w.toLowerCase();
+          if (/^slot(?:\(\d+\)|\[\d+\])$/i.test(w) || /^slot\d+$/i.test(w)) {
+            tk(L, t.s, w, 't-slot');
+            return;
+          }
           if (GATES.includes(lw) || lw === 'not') { tk(L, t.s, w, 't-gate'); return; }
           if (GATES2.includes(lw) || PREFIX.includes(lw) || MODIFIERS.includes(lw) || SETS.includes(w.toUpperCase()) || ['step', 'default', 'unit'].includes(lw)) { tk(L, t.s, w, 't-kw'); return; }
           if (lw === 'then') { tk(L, t.s, w, 't-kw'); return; }
@@ -343,7 +389,7 @@ function analyze(text) {
     if (ci >= 0) tk(L, ci, l.slice(ci), 't-cmt');
   });
 
-  return { lines, cats, tagMap, N };
+  return { lines, cats, tagMap, N, master };
 }
 
 /* ───────── state + metrics ───────── */
@@ -613,6 +659,10 @@ function completion(manual) {
   const full = v.slice(c.ls, le), beforeC = full.slice(0, c.col), after = full.slice(c.col);
   if (beforeC.includes('//')) return null;
   const mode = L.mode;
+  const gameWords = [
+    ['GUESS', 'submit a guess'], ['FEEDBACK', 'record feedback'],
+    ['NEXT_MOVE', 'show the next-move status'], ['code', 'declare code length and range']
+  ];
 
   // tag letters inside [ ] on a SETUP line
   if (mode === 1) {
@@ -653,6 +703,23 @@ function completion(manual) {
     addSec(0);
     if (!atStart && (prefix.startsWith('.') || (manual && !prefix))) list.push({ it: { label: '...', insert: '... ', detail: 'continue the number step', color: SEC_COLOR }, r: 0 });
   } else {
+    if (atStart) {
+      gameWords.forEach(([label, detail]) => {
+        const r = matchRank(label, pl);
+        if (r >= 0) list.push({ it: { label, insert: label + ' ', detail, color: label === 'NEXT_MOVE' ? SEC_COLOR : GATE_COLOR }, r: r - 0.2 });
+      });
+    }
+    if (L.kind === 'master-game' || /(?:GUESS|FEEDBACK|NEXT_MOVE)\s*$/i.test(beforeC)) {
+      const vals = /^\s*NEXT_MOVE/i.test(full)
+        ? ['READY', 'PENDING', 'BLOCKED', 'DONE', 'UNKNOWN', 'WAITING']
+        : /^\s*FEEDBACK/i.test(full)
+          ? ['exact', 'misplaced', 'correct', 'present', 'absent']
+          : A.master.declarations.flatMap(d => Array.from({ length: Math.min(d.count, 12) }, (_, i) => `slot${i + 1}`));
+      vals.forEach(label => {
+        const r = matchRank(label, pl);
+        if (r >= 0) list.push({ it: { label, insert: label + ' ', detail: /^slot/i.test(label) ? 'slot reference' : 'status/feedback', color: /^slot/i.test(label) ? 'var(--text-sec)' : SEC_COLOR }, r });
+      });
+    }
     const valueStart = atStart || isOp || GATES.includes(ptl) || ptl === 'not' || ptl === 'of' || ptl === 'then';
     const afterValue = !valueStart && prevTok !== '';
     if (A.tagMap.has(prevTok)) {

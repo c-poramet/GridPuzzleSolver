@@ -169,6 +169,7 @@ code{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-pri)}
 .t-id{color:var(--text-pri)}
 .t-cname,.t-tagdef{color:var(--c);font-weight:700}
 .t-item,.t-ent,.t-tag{color:var(--c)}
+.t-slot{color:#b7d7ff;font-weight:600}
 .t-etag{opacity:.62;font-weight:700}
 .t-bad{text-decoration:underline wavy var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
 .bm{background:rgba(255,255,255,.14);border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.22)}

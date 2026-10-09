@@ -154,6 +154,36 @@ Braced sets support equality and membership: `{A B} = {C D}`, `A in {B C}`, and 
 
 Steps show counts, newly certain facts, optional arrangements, and plain-language explanations (hold Shift while hovering). The answer table can be reordered. **Normalize** (`Ctrl/⌘ Alt N`) rewrites selected lines to conservative canonical long spelling; it never runs the solver. Quick fixes use a lightbulb and `Ctrl/⌘ .`; they edit text, preserve undo, and set the badge to `edited`.
 
+### Slots games (Mastermind and variants)
+
+The solver supports a compact slots mode alongside the existing grid language:
+
+```
+code 3 slots from 0 .. 9 unique
+code 682 := 1e
+code 614 := 1n
+code 206 := 2n
+code 738 := none
+```
+
+`code N slots from ...` declares the slot count and alphabet. Numeric ranges
+and explicit alphabets are supported; `unique` disallows repeated symbols and
+`repeat` (the default) allows them. Single-character alphabets may be guessed
+packed (`682`); multi-character symbols must be separated by spaces.
+
+The `:=` form is `category guess := feedback`. Feedback accepts long words
+(`exact`, `near`, `none`) and compact forms such as `1e`, `2n`, and `1e2n`.
+Exact matches are counted first; near matches use the remaining occurrences,
+so repeated symbols are scored correctly. A bare `none` means no symbol occurs.
+For example, the number-lock sequence above leaves `042` as its answer and
+reproduces the usual 126 → 30 → 1 progression.
+
+The runtime also accepts `GUESS`, `FEEDBACK`, `has`, `lacks`, and basic numeric
+slot predicates for compatible slots programs. `NEXT_MOVE`, multiple slot
+categories, full grid/slots coupling, formula sets, and asynchronous
+best-guess search are not yet implemented; those constructs are highlighted
+and diagnosed by the editor but should not be used as solver input yet.
+
 ### Settings and accessibility
 
 Open **Settings** in the top-right header to customize the interface without
@@ -174,6 +204,10 @@ change the meaning of a GSL program.
 ## Upgrading from old syntax
 
 Everything that worked before remains valid, including tagged entities, `then`/`after`, `of`, list gates, `THRESHOLD`, and `LISTMAX`. Tags may now be multi-letter or omitted; names are case-insensitive; keywords are contextual; single-letter items are legal; ambiguity is reported instead of guessed; the 26-category limit is gone; and `<=`, `>=`, `*`, `/`, unary minus and distance now exist. Old workaround recipes remain accepted but are no longer required.
+
+Slots syntax is additive. Existing GSL programs do not need to be rewritten;
+`SETUP`, `START`, and `SOLVE` retain their previous meaning. Unsupported
+advanced slots constructs should be removed or commented out before solving.
 
 ## Errors and quick fixes
 
