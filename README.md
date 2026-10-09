@@ -275,6 +275,7 @@ direct `file://` use remains supported without a bundler.
 | `styles.css` | Dark theme and layout |
 | `editor.js` | Highlighting, autocomplete, diagnostics, fixes, Normalize |
 | `core/runtime.js` | Shared escaping and line-numbered runtime errors |
+| `solvers/legacy.js` | Legacy setup parsing, clue compilation, and grid search |
 | `solvers/slots.js` | Mastermind/slots parsing, filtering, and result rendering |
 | `solvers/columns.js` | Repeating/unique column enumeration and clue filtering |
 | `renderers/answer-table.js` | Legacy answer-table rendering |
