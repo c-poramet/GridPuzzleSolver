@@ -27,6 +27,86 @@ lowercase and case-sensitive.
 Once the clues give a result the site also shows an answer table, so no extra output
 is needed.
 
+# SLOTS MODE (MASTERMIND AND NUMBER-LOCK PUZZLES)
+
+Use slots mode only when the source is a code-breaking puzzle rather than a
+logic-grid puzzle. It is a separate program form and currently supports one
+slots category per program:
+
+```
+code 3 slots from 0 .. 9 unique
+code 682 := 1e
+code 614 := 1n
+code 206 := 2n
+code 738 := none
+code 780 := 1n
+```
+
+The declaration is:
+
+```
+<name> <N> slots from <alphabet> [unique | repeat]
+```
+
+Use an ascending integer range (`0 .. 9`, with either two or three dots), an
+explicit space-separated alphabet (`R G B Y`), or the built-in `digits`,
+`binary`, or `letters` alphabets. `repeat` is the default; `unique` rejects
+codes with repeated symbols and requires `N` not to exceed the alphabet size.
+The practical limits are 12 slots and 33 generated range values. Use
+single-character symbols for packed guesses; separate multi-character symbols
+with spaces.
+
+## Guess and feedback translation
+
+Translate each source guess as:
+
+```
+<slots-name> <guess> := <feedback>
+```
+
+The guess may be packed (`682`) or spaced (`6 8 2`). Feedback may use:
+
+- `exact`, `correct`, or `e` for correctly placed symbols
+- `near`, `misplaced`, `present`, or `n` for present but misplaced symbols
+- `none` for zero exact and zero near
+- compact counts such as `1e`, `2n`, or `1e2n`
+- long counts such as `1 exact 2 near`
+
+Examples:
+
+```
+code R R G B := 1 exact 2 near
+code G B Y Y := 2 near
+code 682 := 1e
+```
+
+Do not invent feedback counts. Exact matches are removed first, then repeated
+symbols are matched once each to calculate near matches. The solver filters all
+possible codes using that exact/near pair. Keep the original clue order.
+
+The runtime also accepts these supported slot-only forms when they match the
+declared numeric alphabet:
+
+```
+GUESS 682
+FEEDBACK 1 exact 0 near
+has 7
+lacks 7
+even slot[2]
+odd slot[3]
+```
+
+`GUESS` stores a guess for a following `FEEDBACK` line. The combined
+`<name> <guess> := <feedback>` form is preferred because it keeps the guess and
+feedback on one source line. `slot1`, `slot(1)`, and `slot[1]` can be used for
+single-slot numeric constraints. Use `THRESHOLD` and `LISTMAX` as usual.
+
+Do not emit `NEXT_MOVE`, multiple slots categories, category-backed alphabets,
+grid/slots cross-references, formula-set syntax, or blended grid/slots clues:
+these are planned language features, not supported translation targets in the
+current runtime. If the source requires one of them, mention it in Notes rather
+than silently approximating it.
+
 # SETUP RULES
 - Category name: one unquoted word, or a quoted name when needed; it must not be
   a reserved word.
@@ -182,7 +262,10 @@ Rule of thumb: values with real quantities use + - < >; position/sequence wordin
 
 # LIMITS AND CURRENTLY UNSUPPORTED FOR TRANSLATION
 - More than 12 items in one category.
+- More than 12 slots, more than 33 generated numeric alphabet values, or more
+  than one slots category in a program.
 - Arithmetic expressions inside `then`/`after` chains.
+- Advanced slots constructs listed as unsupported in **SLOTS MODE** above.
 - If a requested construct is not listed in this prompt, say so in Notes rather
   than inventing syntax. The solver also supports `<=`, `>=`, `*`, `/`, unary
   minus, distance (`apart`/`~`), counting, ranges, aliases, and ordered
@@ -207,6 +290,9 @@ Escape hatch: list valid value pairs with parenthesized gates, e.g.
    its unit (`500g`, `10o`, `g of X`, or `DEFAULT UNIT = g`).
 10. Ambiguity: pick the standard puzzle reading, translate it, list the alternative in
     Notes. Never silently drop a clue.
+11. For slots mode, verify the slot count, alphabet, `unique`/`repeat` mode,
+    packed-guess length, alphabet membership, and feedback counts. Preserve
+    every guess in source order and use `:=` for combined guess/feedback lines.
 
 # EXAMPLES
 Puzzle: genes 250, 500, ...; bacteria B, D, E, L; doctors I, O, L, W.

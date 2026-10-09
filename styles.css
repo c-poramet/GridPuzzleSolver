@@ -90,6 +90,9 @@ code{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-pri)}
 .sols{margin:8px 0 0 28px;display:flex;flex-direction:column;gap:3px}
 .sol{font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-sec);padding:4px 8px;border-radius:6px;border:1px solid transparent;overflow-wrap:anywhere}
 .sol:hover{background:var(--surface);border-color:var(--border)}
+.slot-answer{margin-top:8px;padding-top:14px}.slot-grid{font-size:var(--fs-md);text-align:center}
+.slot-grid th,.slot-grid td{padding:13px 18px;text-align:center}.slot-grid thead th{font-size:var(--fs-xs);letter-spacing:.05em}
+.slot-grid tbody th{font-size:var(--fs-xs);color:var(--text-dim);font-weight:400}.slot-cell{display:inline-flex;min-width:2.25em;min-height:2.25em;align-items:center;justify-content:center;border-radius:7px;background:rgba(108,169,101,.14);border:1px solid rgba(108,169,101,.3);color:var(--clr-green);font-size:var(--fs-lg);font-weight:700}
 
 .warn-banner,.solved-banner{padding:10px 14px;border-radius:8px;margin:10px 0;font-family:var(--font-mono);font-size:var(--fs-xs);line-height:1.5}
 .warn-banner{background:rgba(201,127,80,.1);border:1px solid rgba(201,127,80,.22);color:var(--accent)}

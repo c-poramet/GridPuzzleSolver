@@ -184,6 +184,14 @@ categories, full grid/slots coupling, formula sets, and asynchronous
 best-guess search are not yet implemented; those constructs are highlighted
 and diagnosed by the editor but should not be used as solver input yet.
 
+#### Slots output
+
+Slots results use the same answer-table treatment as grid results. Each
+remaining code is a row, with `Slot 1`, `Slot 2`, and so on as columns. A
+single remaining code is shown as **Solution**; multiple codes are shown as
+**Remaining candidates**. The header badge and timeline counts update after
+each guess. `LISTMAX` controls when the candidate table is displayed.
+
 ### Settings and accessibility
 
 Open **Settings** in the top-right header to customize the interface without
@@ -254,7 +262,7 @@ is no build step or dependency.
 | `styles.css` | Dark theme and layout |
 | `editor.js` | Highlighting, autocomplete, diagnostics, fixes, Normalize |
 | `solver.js` | Parsing, propagation, solving, answer table |
-| `Clue_to_GSL_PROMPT.md` | Prompt for translating natural language clues |
+| `Clue_to_GSL_PROMPT.md` | Prompt for translating grid and supported slots clues |
 | `README.md` | This guide |
 
 Saved in the browser: puzzle source, editor wrap preference, panel split, answer-table ordering, and the existing localStorage keys. No data is sent anywhere.

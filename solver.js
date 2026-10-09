@@ -833,7 +833,7 @@ function runSlots(L, out, thr, lm) {
   };
   let pool = candidates, lastGuess = null, currentLine = d.x.n;
   const rows = [`<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${candidates.length.toLocaleString()}</span><span class="stat-lbl">Start</span></div></div>`];
-  const addStep = (x, text) => rows.push(`<div class="step animate-in" data-line="${x.n}"><div class="step-head"><span class="step-n">${rows.length}</span><code class="step-clue">${esc(x.t)}</code><span class="step-count">${pool.length.toLocaleString()} left</span></div><div class="chips"><span class="chip">${esc(text)}</span></div>${pool.length && pool.length <= lm ? `<div class="sols">${pool.map(v => `<div class="sol">${esc(fmtCode(v))}</div>`).join('')}</div>` : ''}</div>`);
+  const addStep = (x, text) => rows.push(`<div class="step animate-in" data-line="${x.n}"><div class="step-head"><span class="step-n">${rows.length}</span><code class="step-clue">${esc(x.t)}</code><span class="step-count">${pool.length.toLocaleString()} left</span></div><div class="chips"><span class="chip">${esc(text)}</span></div></div>`);
   const filter = (pred, x, text) => { pool = pool.filter(pred); addStep(x, text); if (!pool.length) fail(`Contradiction: no slot arrangement satisfies this line`, x.n); };
   const parseFeedback = text => {
     const clean = text.replace(/,/g, ' ').trim();
@@ -912,6 +912,11 @@ function runSlots(L, out, thr, lm) {
     fail('Unsupported slots line; use :=, GUESS, FEEDBACK, has, lacks, even, odd, or formula', x.n);
   }
   rows.push(`<div class="stats-bar stats-final"><div class="stat-chip green"><span class="stat-val">${pool.length.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div></div>`);
+  if (pool.length && pool.length <= lm) {
+    const head = Array.from({ length: d.n }, (_, i) => `<th scope="col"><span class="ch-in"><span class="ch-name">Slot ${i + 1}</span></span></th>`).join('');
+    const body = pool.map((code, row) => `<tr><th scope="row">${row + 1}</th>${code.map(value => `<td><span class="slot-cell">${esc(value)}</span></td>`).join('')}</tr>`).join('');
+    rows.push(`<div class="answer slot-answer"><div class="answer-head"><span class="answer-title${pool.length === 1 ? '' : ' part'}">${pool.length === 1 ? 'Solution' : 'Remaining candidates'}</span><span class="answer-hint">${pool.length === 1 ? 'Each column is one slot' : `${pool.length} possible codes`}</span></div><div class="answer-scroll"><table class="grid slot-grid"><thead><tr><th scope="col">#</th>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`);
+  }
   if (!pool.length) return true;
   rows.push(`<div class="solved-banner">${pool.length <= thr ? 'Slot solution found' : `${pool.length.toLocaleString()} slot arrangements remain`}</div>`);
   out.innerHTML = rows.join('');
