@@ -832,7 +832,7 @@ function runSlots(L, out, thr, lm) {
     return { exact, misplaced };
   };
   let pool = candidates, lastGuess = null, currentLine = d.x.n;
-  const rows = [`<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${candidates.length.toLocaleString()}</span><span class="stat-lbl">Start</span></div>`];
+  const rows = [`<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${candidates.length.toLocaleString()}</span><span class="stat-lbl">Start</span></div></div>`];
   const addStep = (x, text) => rows.push(`<div class="step animate-in" data-line="${x.n}"><div class="step-head"><span class="step-n">${rows.length}</span><code class="step-clue">${esc(x.t)}</code><span class="step-count">${pool.length.toLocaleString()} left</span></div><div class="chips"><span class="chip">${esc(text)}</span></div>${pool.length && pool.length <= lm ? `<div class="sols">${pool.map(v => `<div class="sol">${esc(fmtCode(v))}</div>`).join('')}</div>` : ''}</div>`);
   const filter = (pred, x, text) => { pool = pool.filter(pred); addStep(x, text); if (!pool.length) fail(`Contradiction: no slot arrangement satisfies this line`, x.n); };
   const parseFeedback = text => {
@@ -911,7 +911,7 @@ function runSlots(L, out, thr, lm) {
     }
     fail('Unsupported slots line; use :=, GUESS, FEEDBACK, has, lacks, even, odd, or formula', x.n);
   }
-  rows.push(`<div class="stat-chip green"><span class="stat-val">${pool.length.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div></div>`);
+  rows.push(`<div class="stats-bar stats-final"><div class="stat-chip green"><span class="stat-val">${pool.length.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div></div>`);
   if (!pool.length) return true;
   rows.push(`<div class="solved-banner">${pool.length <= thr ? 'Slot solution found' : `${pool.length.toLocaleString()} slot arrangements remain`}</div>`);
   out.innerHTML = rows.join('');
