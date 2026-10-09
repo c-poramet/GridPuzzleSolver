@@ -19,7 +19,29 @@
     <span class="setting-tag" id="tagList">LISTMAX 10</span>
   </div>
   <span class="count-badge" id="badge">— left</span>
+  <button class="header-settings" id="settingsBtn" type="button" aria-expanded="false" aria-controls="settingsPop" title="Settings">Settings</button>
 </header>
+<div class="settings-pop" id="settingsPop" hidden>
+  <div class="settings-head"><strong>Settings</strong><button class="settings-reset" id="settingsReset" type="button">Reset</button></div>
+  <div class="settings-section">
+    <div class="settings-label">Appearance</div>
+    <label class="settings-row"><span>Theme</span><select id="settingTheme"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="paper">Paper</option><option value="system">System</option></select></label>
+    <label class="settings-row"><span>Contrast</span><input id="settingContrast" type="range" min="90" max="140" step="5" value="100"><output id="settingContrastValue">100%</output></label>
+    <label class="settings-row"><span>Editor text size</span><input id="settingFont" type="range" min="90" max="125" step="5" value="100"><output id="settingFontValue">100%</output></label>
+    <label class="settings-check"><input id="settingLines" type="checkbox" checked> Show line numbers</label>
+    <label class="settings-check"><input id="settingMotion" type="checkbox"> Reduce motion</label>
+  </div>
+  <div class="settings-section">
+    <div class="settings-label">Keybindings</div>
+    <label class="settings-row"><span>Update / solve</span><select data-setting-key="solve"></select></label>
+    <label class="settings-row"><span>Autocomplete</span><select data-setting-key="autocomplete"></select></label>
+    <label class="settings-row"><span>Quick fixes</span><select data-setting-key="fixes"></select></label>
+    <label class="settings-row"><span>Normalize</span><select data-setting-key="normalize"></select></label>
+    <label class="settings-row"><span>Comment line</span><select data-setting-key="comment"></select></label>
+    <label class="settings-row"><span>Word wrap</span><select data-setting-key="wrap"></select></label>
+    <div class="settings-hint">Changes apply immediately and are saved in this browser.</div>
+  </div>
+</div>
 
 <main class="main">
   <div class="solver-layout" id="layout">

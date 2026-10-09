@@ -12,6 +12,74 @@ const injectedStyle = document.createElement('style');
 injectedStyle.textContent = '.ed-fixes{position:fixed;z-index:100;background:#252525;border:1px solid rgba(201,127,80,.55);border-radius:8px;padding:4px;box-shadow:0 8px 24px #000;display:flex;flex-direction:column;gap:2px}.ed-fixes button{background:none;border:0;color:#f0f0f0;padding:7px 10px;text-align:left;font:12px "Space Mono",monospace;cursor:pointer}.ed-fixes button:hover,.ed-fixes button:focus{background:rgba(201,127,80,.2);outline:0}';
 document.head.appendChild(injectedStyle);
 
+const SETTINGS_KEY = 'gridsolver.settings';
+const DEFAULT_SETTINGS = {
+  theme: 'dark', contrast: 100, font: 100, lines: true, motion: false,
+  keys: { solve: 'mod+enter', autocomplete: 'mod+space', fixes: 'mod+.', normalize: 'mod+alt+n', comment: 'mod+/', wrap: 'alt+z' }
+};
+const KEY_OPTIONS = [
+  ['mod+enter', 'Ctrl/⌘ Enter'], ['mod+space', 'Ctrl/⌘ Space'], ['mod+.', 'Ctrl/⌘ .'],
+  ['mod+alt+n', 'Ctrl/⌘ Alt N'], ['mod+/', 'Ctrl/⌘ /'], ['alt+z', 'Alt Z'], ['off', 'Disabled']
+];
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    return { ...DEFAULT_SETTINGS, ...saved, keys: { ...DEFAULT_SETTINGS.keys, ...(saved.keys || {}) } };
+  } catch (e) { return { ...DEFAULT_SETTINGS, keys: { ...DEFAULT_SETTINGS.keys } }; }
+}
+const settings = loadSettings();
+const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} };
+const keyMatches = (name, e) => {
+  const spec = settings.keys[name]; if (!spec || spec === 'off') return false;
+  const pieces = spec.split('+');
+  const [mods, key] = pieces.length > 1 ? [pieces.slice(0, -1), pieces[pieces.length - 1]] : [[], spec];
+  return (mods.includes('mod') ? (e.ctrlKey || e.metaKey) : !e.ctrlKey && !e.metaKey)
+    && (mods.includes('alt') ? e.altKey : !e.altKey)
+    && (mods.includes('shift') ? e.shiftKey : !e.shiftKey)
+    && (key === 'enter' ? e.key === 'Enter' : key === 'space' ? (e.code === 'Space' || e.key === ' ') : key === e.key.toLowerCase());
+};
+window.GSSettings = { keyMatches, label(name) { return KEY_OPTIONS.find(x => x[0] === settings.keys[name])?.[1] || 'Disabled'; } };
+function applySettings() {
+  const paper = settings.theme === 'paper' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+  document.body.classList.toggle('theme-midnight', settings.theme === 'midnight');
+  document.body.classList.toggle('theme-paper', paper);
+  document.body.classList.toggle('high-contrast', Number(settings.contrast) >= 120);
+  document.body.classList.toggle('no-lines', !settings.lines);
+  document.body.classList.toggle('reduce-motion', settings.motion);
+  document.documentElement.style.setProperty('--ui-scale', `${Number(settings.font) / 100}`);
+  document.documentElement.style.filter = `contrast(${Number(settings.contrast) / 100})`;
+}
+function initSettings() {
+  const popover = $('settingsPop'), button = $('settingsBtn');
+  if (!popover || !button) return;
+  popover.querySelectorAll('select[data-setting-key]').forEach(select => {
+    const key = select.dataset.settingKey;
+    KEY_OPTIONS.forEach(([value, label]) => select.add(new Option(label, value)));
+    select.value = settings.keys[key] || 'off';
+    select.addEventListener('change', () => { settings.keys[key] = select.value; saveSettings(); });
+  });
+  const theme = $('settingTheme'), contrast = $('settingContrast'), font = $('settingFont');
+  const lines = $('settingLines'), motion = $('settingMotion');
+  theme.value = settings.theme; contrast.value = settings.contrast; font.value = settings.font;
+  lines.checked = settings.lines; motion.checked = settings.motion;
+  const sync = () => {
+    $('settingContrastValue').value = `${contrast.value}%`; $('settingFontValue').value = `${font.value}%`;
+    settings.theme = theme.value; settings.contrast = +contrast.value; settings.font = +font.value;
+    settings.lines = lines.checked; settings.motion = motion.checked; saveSettings(); applySettings(); measure(); paint();
+  };
+  [theme, contrast, font, lines, motion].forEach(x => x.addEventListener('input', sync));
+  [theme, lines, motion].forEach(x => x.addEventListener('change', sync));
+  $('settingsReset').addEventListener('click', () => {
+    Object.assign(settings, { ...DEFAULT_SETTINGS, keys: { ...DEFAULT_SETTINGS.keys } }); saveSettings();
+    popover.querySelectorAll('select[data-setting-key]').forEach(x => { x.value = settings.keys[x.dataset.settingKey]; });
+    theme.value = settings.theme; contrast.value = settings.contrast; font.value = settings.font; lines.checked = settings.lines; motion.checked = settings.motion; sync();
+  });
+  const toggle = on => { popover.hidden = !on; button.setAttribute('aria-expanded', String(on)); };
+  button.addEventListener('click', e => { e.stopPropagation(); toggle(popover.hidden); });
+  document.addEventListener('click', e => { if (!popover.hidden && !popover.contains(e.target) && e.target !== button) toggle(false); });
+  applySettings(); sync();
+}
+
 /* ───────── language data ───────── */
 const SECTION = ['SETUP', 'START', 'SOLVE'];
 const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT'];
@@ -644,8 +712,8 @@ const PAIRS = { '(': ')', '[': ']' };
 ta.addEventListener('keydown', e => {
   if (e.isComposing) return;
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.altKey && e.code === 'KeyN') { e.preventDefault(); normalizeLines(); return; }
-  if (mod && e.key === '.') { e.preventDefault(); showFixes(); return; }
+  if (window.GSSettings.keyMatches('normalize', e)) { e.preventDefault(); normalizeLines(); return; }
+  if (window.GSSettings.keyMatches('fixes', e)) { e.preventDefault(); showFixes(); return; }
   if (ac.open) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); return; }
     if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); accept(ac.sel); return; }
@@ -655,9 +723,9 @@ ta.addEventListener('keydown', e => {
     }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePop(); return; }
   }
-  if (mod && (e.code === 'Space' || e.key === ' ')) { e.preventDefault(); updatePop(true); return; }
-  if (mod && e.key === '/') { e.preventDefault(); toggleComment(); return; }
-  if (e.altKey && !mod && !e.shiftKey && e.code === 'KeyZ') { e.preventDefault(); setWrap(!wrap, true); return; }
+  if (window.GSSettings.keyMatches('autocomplete', e)) { e.preventDefault(); updatePop(true); return; }
+  if (window.GSSettings.keyMatches('comment', e)) { e.preventDefault(); toggleComment(); return; }
+  if (window.GSSettings.keyMatches('wrap', e)) { e.preventDefault(); setWrap(!wrap, true); return; }
   if (e.altKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
     e.preventDefault();
     const d = e.key === 'ArrowDown' ? 1 : -1;
@@ -772,4 +840,5 @@ let wrapSaved = null; try { wrapSaved = localStorage.getItem(WRAP_KEY); } catch 
 wrap = wrapSaved === '1';
 setWrap(wrap, false);
 refresh();
+initSettings();
 })();

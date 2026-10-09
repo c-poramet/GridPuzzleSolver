@@ -154,6 +154,20 @@ Braced sets support equality and membership: `{A B} = {C D}`, `A in {B C}`, and 
 
 Steps show counts, newly certain facts, optional arrangements, and plain-language explanations (hold Shift while hovering). The answer table can be reordered. **Normalize** (`Ctrl/⌘ Alt N`) rewrites selected lines to conservative canonical long spelling; it never runs the solver. Quick fixes use a lightbulb and `Ctrl/⌘ .`; they edit text, preserve undo, and set the badge to `edited`.
 
+### Settings and accessibility
+
+Open **Settings** in the top-right header to customize the interface without
+changing the puzzle source. Preferences are saved in the browser:
+
+- Dark, Midnight, Paper, or System theme
+- Contrast level and editor text size
+- Line-number visibility and reduced motion
+- Keybindings for Update/solve, autocomplete, quick fixes, Normalize, comments,
+  and word wrap
+
+The Reset button restores the defaults. Settings are local-only and do not
+change the meaning of a GSL program.
+
 ## Upgrading from old syntax
 
 Everything that worked before remains valid, including tagged entities, `then`/`after`, `of`, list gates, `THRESHOLD`, and `LISTMAX`. Tags may now be multi-letter or omitted; names are case-insensitive; keywords are contextual; single-letter items are legal; ambiguity is reported instead of guessed; the 26-category limit is gone; and `<=`, `>=`, `*`, `/`, unary minus and distance now exist. Old workaround recipes remain accepted but are no longer required.
@@ -187,6 +201,9 @@ Every diagnostic includes its source line. Solver errors remain authoritative; t
 | Move line | `Alt ↑ ↓` |
 | Duplicate line | `Shift Alt ↑ ↓` |
 | Wrap | `Alt Z` |
+
+All shortcuts can be changed or disabled from **Settings**. The displayed
+shortcut labels use `Ctrl/⌘` to mean Ctrl on Windows/Linux and Command on macOS.
 
 ## Limits and files
 

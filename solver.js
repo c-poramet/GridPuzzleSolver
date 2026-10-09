@@ -976,7 +976,7 @@ $('src').addEventListener('input', () => { store.set($('src').value); if ($('src
 addEventListener('pagehide', () => store.set($('src').value));
 $('ex').onclick = () => { setText(EX, true); run(); };
 $('clr').onclick = () => { setText('', true); run(); };
-$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) run(); });
+$('src').addEventListener('keydown', e => { if (window.GSSettings?.keyMatches('solve', e)) { e.preventDefault(); run(); } });
 
 // steps <-> editor: hover previews the clue line, click jumps to it; Shift + hover explains the clue
 const outEl = $('out');
