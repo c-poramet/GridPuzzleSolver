@@ -785,7 +785,7 @@ function runSlots(L, out, thr, lm) {
   if (decls.length > 1) fail('Only one slots declaration is supported per program', decls[1].x.n);
   const d = decls[0];
   if (d.n < 1 || d.n > 12) fail('Slot count must be between 1 and 12', d.x.n);
-  let alpha = [], r = d.source.match(/^(-?\d+(?:\.\d+)?)\s*\.\.\s*(-?\d+(?:\.\d+)?)$/);
+  let alpha = [], r = d.source.match(/^(-?\d+(?:\.\d+)?)\s*\.\.\.?\s*(-?\d+(?:\.\d+)?)$/);
   if (r) {
     const a = +r[1], b = +r[2];
     if (a > b || !Number.isInteger(a) || !Number.isInteger(b)) fail('Slot alphabet range must ascend through integer values', d.x.n);
