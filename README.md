@@ -164,6 +164,9 @@ changing the puzzle source. Preferences are saved in the browser:
 - Line-number visibility and reduced motion
 - Keybindings for Update/solve, autocomplete, quick fixes, Normalize, comments,
   and word wrap
+- Additional presets include Shift variants and Ctrl/⌘ Alt shortcuts. Use
+  **Record** beside any action to capture a custom combination, including
+  navigation and function keys; press Escape while recording to cancel.
 
 The Reset button restores the defaults. Settings are local-only and do not
 change the meaning of a GSL program.

@@ -18,8 +18,11 @@ const DEFAULT_SETTINGS = {
   keys: { solve: 'mod+enter', autocomplete: 'mod+space', fixes: 'mod+.', normalize: 'mod+alt+n', comment: 'mod+/', wrap: 'alt+z' }
 };
 const KEY_OPTIONS = [
-  ['mod+enter', 'Ctrl/⌘ Enter'], ['mod+space', 'Ctrl/⌘ Space'], ['mod+.', 'Ctrl/⌘ .'],
-  ['mod+alt+n', 'Ctrl/⌘ Alt N'], ['mod+/', 'Ctrl/⌘ /'], ['alt+z', 'Alt Z'], ['off', 'Disabled']
+  ['mod+enter', 'Ctrl/⌘ Enter'], ['mod+space', 'Ctrl/⌘ Space'], ['mod+shift+enter', 'Ctrl/⌘ Shift Enter'],
+  ['mod+shift+space', 'Ctrl/⌘ Shift Space'], ['mod+.', 'Ctrl/⌘ .'], ['mod+shift+.', 'Ctrl/⌘ Shift .'],
+  ['mod+alt+n', 'Ctrl/⌘ Alt N'], ['mod+alt+f', 'Ctrl/⌘ Alt F'], ['mod+/', 'Ctrl/⌘ /'],
+  ['mod+shift+/', 'Ctrl/⌘ Shift /'], ['alt+z', 'Alt Z'], ['alt+shift+z', 'Alt Shift Z'],
+  ['off', 'Disabled']
 ];
 function loadSettings() {
   try {
@@ -29,6 +32,14 @@ function loadSettings() {
 }
 const settings = loadSettings();
 const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {} };
+const keyName = key => ({ ' ': 'space', Enter: 'enter', Tab: 'tab', Escape: 'escape', Backspace: 'backspace', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown' }[key] || key.toLowerCase());
+const keyLabel = key => ({ space: 'Space', enter: 'Enter', tab: 'Tab', escape: 'Escape', backspace: 'Backspace', delete: 'Delete', up: 'Up', down: 'Down', left: 'Left', right: 'Right', home: 'Home', end: 'End', pageup: 'Page Up', pagedown: 'Page Down' }[key] || key.toUpperCase());
+const specLabel = spec => {
+  const known = KEY_OPTIONS.find(x => x[0] === spec);
+  if (known) return known[1];
+  if (!spec || spec === 'off') return 'Disabled';
+  return spec.split('+').map((part, i) => i === spec.split('+').length - 1 ? keyLabel(part) : part === 'mod' ? 'Ctrl/⌘' : part[0].toUpperCase() + part.slice(1)).join(' ');
+};
 const keyMatches = (name, e) => {
   const spec = settings.keys[name]; if (!spec || spec === 'off') return false;
   const pieces = spec.split('+');
@@ -36,9 +47,9 @@ const keyMatches = (name, e) => {
   return (mods.includes('mod') ? (e.ctrlKey || e.metaKey) : !e.ctrlKey && !e.metaKey)
     && (mods.includes('alt') ? e.altKey : !e.altKey)
     && (mods.includes('shift') ? e.shiftKey : !e.shiftKey)
-    && (key === 'enter' ? e.key === 'Enter' : key === 'space' ? (e.code === 'Space' || e.key === ' ') : key === e.key.toLowerCase());
+    && (key === 'space' ? (e.code === 'Space' || e.key === ' ') : key === keyName(e.key));
 };
-window.GSSettings = { keyMatches, label(name) { return KEY_OPTIONS.find(x => x[0] === settings.keys[name])?.[1] || 'Disabled'; } };
+window.GSSettings = { keyMatches, label(name) { return specLabel(settings.keys[name]); } };
 function applySettings() {
   const paper = settings.theme === 'paper' || (settings.theme === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
   document.body.classList.toggle('theme-midnight', settings.theme === 'midnight');
@@ -55,8 +66,39 @@ function initSettings() {
   popover.querySelectorAll('select[data-setting-key]').forEach(select => {
     const key = select.dataset.settingKey;
     KEY_OPTIONS.forEach(([value, label]) => select.add(new Option(label, value)));
-    select.value = settings.keys[key] || 'off';
-    select.addEventListener('change', () => { settings.keys[key] = select.value; saveSettings(); });
+    const current = settings.keys[key] || 'off';
+    if (!KEY_OPTIONS.some(x => x[0] === current)) select.add(new Option(`Custom: ${specLabel(current)}`, 'custom'));
+    select.value = KEY_OPTIONS.some(x => x[0] === current) ? current : 'custom';
+    select.addEventListener('change', () => {
+      if (select.value === 'custom') return;
+      settings.keys[key] = select.value; saveSettings();
+    });
+  });
+  const recordButtons = popover.querySelectorAll('[data-key-record]');
+  recordButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.keyRecord;
+      button.dataset.recording = 'true'; button.textContent = 'Press…'; button.setAttribute('aria-label', `Press a key combination for ${key}`);
+      const capture = e => {
+        e.preventDefault(); e.stopPropagation();
+        if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+          button.dataset.recording = 'false'; button.textContent = 'Record'; button.setAttribute('aria-label', 'Record'); document.removeEventListener('keydown', capture, true); return;
+        }
+        if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) return;
+        const mods = []; if (e.ctrlKey || e.metaKey) mods.push('mod'); if (e.altKey) mods.push('alt'); if (e.shiftKey) mods.push('shift');
+        settings.keys[key] = [...mods, keyName(e.key)].join('+'); saveSettings();
+        const select = popover.querySelector(`select[data-setting-key="${key}"]`);
+        if (select) {
+          const custom = select.querySelector('option[value="custom"]');
+          if (custom) custom.textContent = `Custom: ${specLabel(settings.keys[key])}`;
+          else select.add(new Option(`Custom: ${specLabel(settings.keys[key])}`, 'custom'));
+          select.value = 'custom';
+        }
+        button.dataset.recording = 'false'; button.textContent = 'Record'; button.setAttribute('aria-label', 'Record'); document.removeEventListener('keydown', capture, true);
+        button.title = `Current: ${specLabel(settings.keys[key])}`;
+      };
+      document.addEventListener('keydown', capture, true);
+    });
   });
   const theme = $('settingTheme'), contrast = $('settingContrast'), font = $('settingFont');
   const lines = $('settingLines'), motion = $('settingMotion');
@@ -71,7 +113,15 @@ function initSettings() {
   [theme, lines, motion].forEach(x => x.addEventListener('change', sync));
   $('settingsReset').addEventListener('click', () => {
     Object.assign(settings, { ...DEFAULT_SETTINGS, keys: { ...DEFAULT_SETTINGS.keys } }); saveSettings();
-    popover.querySelectorAll('select[data-setting-key]').forEach(x => { x.value = settings.keys[x.dataset.settingKey]; });
+    popover.querySelectorAll('select[data-setting-key]').forEach(x => {
+      const value = settings.keys[x.dataset.settingKey];
+      if (!KEY_OPTIONS.some(o => o[0] === value)) {
+        let custom = x.querySelector('option[value="custom"]');
+        if (!custom) custom = x.add(new Option('', 'custom'));
+        custom.textContent = `Custom: ${specLabel(value)}`;
+      }
+      x.value = KEY_OPTIONS.some(o => o[0] === value) ? value : 'custom';
+    });
     theme.value = settings.theme; contrast.value = settings.contrast; font.value = settings.font; lines.checked = settings.lines; motion.checked = settings.motion; sync();
   });
   const toggle = on => { popover.hidden = !on; button.setAttribute('aria-expanded', String(on)); };
