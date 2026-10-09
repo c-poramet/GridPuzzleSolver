@@ -117,6 +117,13 @@ Order words applied to bare values are existential: `King before Queen` means
 some King is before some Queen. Product values use `(King, Heart)` and
 components use `hand[1].card` or `hand[1].suit`.
 
+The current runtime supports the core repeating/unique/product syntax above,
+but do not assume that every advanced form from a future language design is
+available. In particular, do not emit unsupported full quantifier variants,
+unlisted row-column order operators, or syntax described as planned/partial in
+the project README. If a source clue requires one of those forms, preserve the
+clue in Notes as unexpressed rather than inventing a near-equivalent.
+
 # SETUP RULES
 - Category name: one unquoted word, or a quoted name when needed; it must not be
   a reserved word.
@@ -147,7 +154,7 @@ components use `hand[1].card` or `hand[1].suit`.
 | Written | Meaning |
 |---|---|
 | Wd | item W of the category tagged d: item name + tag (last char is the tag) |
-| 1000g | the item/value in unit `g` whose value or position is 1000 |
+| 1000g | the item/value in unit `g` whose value or position is 1000; in arithmetic, a tagged number may instead be a constant such as `6d` |
 | 5 or 5.5 | a plain number (only for arithmetic or numeric comparison) |
 | b of Id | the b-entity belonging to Id ("the bacteria sequenced by Dr. Ingram"). Needs an entity or number+tag after "of" |
 | g of Id | same idea with a numeric tag: the genes value of Id. It also fixes the unit to g |
@@ -182,8 +189,12 @@ comparisons in a row without parentheses.
   category: "Bb - 500 = Db" means genes(Bb) - 500 = genes(Db).
 - Unit inference: with ONE numeric category the unit is automatic. With several,
   put a unit on a number (A = B + 3g) or use "g of X" (g of A < g of B,
-  g of A - g of B = 3). Each expression/comparison/chain needs exactly one unit.
-  Never mix units in one expression.
+  g of A - g of B = 3). A tagged numeric constant may be outside the declared
+  item list when it is used in arithmetic: `Annf + Bobf = 6d` means the day
+  positions sum to 6, and `Dif - Bobf = 10c` means the costs differ by 10.
+  The explicit tag on the comparison side supplies the unit for an otherwise
+  ambiguous arithmetic expression. For order chains, however, `4d` is a
+  position and must be valid. Never mix units in one expression.
 - Value lists distribute: X = A or B means (X = A) or (X = B). "and" between one
   value and a list is an ERROR for "=" (one thing cannot equal two things).
 - "!=" with a list means NONE of them and only accepts "or" / "and":
@@ -289,7 +300,9 @@ Escape hatch: list valid value pairs with parenthesized gates, e.g.
 2. No item or category name is reserved (including "then" and "after"), a single
    lowercase letter, or duplicate; category names have no spaces.
 3. Equal item counts (max 12); numeric "..." expands to exactly N values.
-4. Every number+tag value exists in its category.
+4. Every number+tag value used as an order position exists in its category.
+   Arithmetic constants may be outside the listed values when the expression
+   explicitly uses the tag, for example `A + B = 6d` or `C - D = 10c`.
 5. Direction of every more/fewer/before/after re-read against the source text.
 6. Two comparisons never share a clue without parentheses around each.
 7. No "and" between one value and a list after "="; "!=" lists use only or/and; no
@@ -297,7 +310,9 @@ Escape hatch: list valid value pairs with parenthesized gates, e.g.
 8. Every then/after chain uses entities (not arithmetic), has something on both sides,
    uses one direction only, and contains no gate words.
 9. With several numeric or ordered categories, every arithmetic/order clue names
-   its unit (`500g`, `10o`, `g of X`, or `DEFAULT UNIT = g`).
+   its unit (`500g`, `10o`, `g of X`, or `DEFAULT UNIT = g`). An explicit tagged
+   arithmetic target may supply the unit for the expression on the other side;
+   do not report `A + B = 6d` as ambiguous.
 10. Ambiguity: pick the standard puzzle reading, translate it, list the alternative in
     Notes. Never silently drop a clue.
 11. For slots mode, verify the slot count, alphabet, `unique`/`repeat` mode,

@@ -137,12 +137,22 @@ A numeric or ordered category is a unit. Units are inferred from an explicit
 suffix, an operand, `DEFAULT UNIT`, or the sole order-capable category. A
 number may be glued to a one-or-more-letter unit tag: `5o`, `1h`, `10o`,
 `2.5kg`. With several candidates the diagnostic says `Which unit?` and offers
-fixes. `X.cat`, `X's cat`, and `cat of X` are equivalent and chainable.
-`X.own_category` selects X itself.
+fixes. In arithmetic, a tagged number may be a constant even when it is not
+one of the category's listed items: `Annf + Bobf = 6d` means that the two
+day-valued positions add to 6, and `Dif - Bobf = 10c` means their costs differ
+by 10. The explicit tag on the other side supplies the unit, so an expression
+such as `Annf + Bobf` does not need to guess between `day` and `cost`.
+For order clues, by contrast, `4d` still means the fourth day position and
+must be a valid position. `X.cat`, `X's cat`, and `cat of X` are equivalent and
+chainable. `X.own_category` selects X itself.
 
 ### Operators, order and position
 
 GSL supports `= != < > <= >= + - * /`, unary minus, parentheses, and `~`/`apart`. Arithmetic uses values; `beside`/`adj` and `within` use slot distance. `then`/`after` describe positions. `before`, `right before/after`, `N before/after`, `N+ before`, `first`, `last`, `at N`, `between`, and circular-only `opposite` are available. `then ? then` and legacy `then+`, `after+` remain valid.
+
+`after` and `after+` are legacy spellings of reversed `then` and `then+`
+chains: `A after B` means `B then A`, and `A after+ B` means `B then+ A`.
+They remain order operators when a clue is selected in the editor.
 
 Chains (`A < B < C`, `A = B = C`) apply pairwise. Use `alldiff`/`allsame` for explicit intent. A circular category rejects linear-only words and suggests a circular alternative.
 
@@ -186,6 +196,24 @@ holding King precedes some row holding Queen. `card has King x2` and
 duplicate pairs; it is the safe replacement for `alldiff card suit` when
 columns repeat.
 
+For a traditional multi-unit grid, arithmetic constants can be tagged on the
+right-hand side:
+
+```
+SETUP
+friend [f] Ann Bob Cy Di
+day [d] 1 2 3 4
+cost [c] 10 20 30 40
+
+START
+Annf + Bobf = 6d
+Dif - Bobf = 10c
+```
+
+The tags disambiguate the arithmetic units. Do not replace `6d` with a bare
+`6` when both `day` and `cost` are available, and do not use an out-of-range
+tagged number such as `6d` as an order position.
+
 Pools are aliases for a named alphabet and do not create rows:
 
 ```
@@ -201,6 +229,36 @@ dealt hand with no repeated pair. Unused values are shown below the answer
 table; if the solver cannot decide, it reports the remaining candidates.
 Useful recipes include a dealt hand (`card * suit unique`) and tiles that form
 a full set (`distinct colour shape`).
+
+### Implementation status
+
+The repeating/unique/product work is implemented and available from `file://`:
+
+- **Complete:** automatic rows and `ROWS`; `repeat` and `unique` declarations;
+  equivalent `slots on` declarations; pool aliases (`domain`, `pool`,
+  `values`); product alphabets; tuple values and component access; indexed and
+  entity cell access; unique-column unused-item reporting; existential value
+  readings for order words; `has`/`lacks`; `distinct`; and the core answer
+  table.
+- **Preserved:** ordinary equal-sized legacy programs continue through the
+  legacy grid engine. Tagged order syntax, including `after`, `after+`, `then+`,
+  and tagged arithmetic constants such as `6d` and `10c`, remains supported.
+- **Editor support:** contextual highlighting, autocomplete vocabulary, basic
+  Normalize support, and diagnostics for the new declarations are present.
+
+The following parts of the larger repeating/product brief are still unfinished
+or intentionally partial: full connected-component search optimization; a
+deducer module (the repository currently has no `deducer.js`); complete
+soundness/property-test coverage; every advanced order form (`within`, `at`,
+`apart`, and all chain variants) in the row-column engine; the full quantifier
+family and all set/composite-value forms; exhaustive quick fixes and
+ambiguity-specific edits; complete canonical Normalize AST round-tripping; and
+complete explainer wording for every new clause. Product alphabets are subject
+to the row-search budget, and large programs may still show estimates.
+
+These are implementation-status notes, not alternate syntax. Use only the
+forms documented as supported above; do not assume that a listed planned or
+partial feature is silently accepted.
 
 ### Results and editor
 
@@ -321,6 +379,9 @@ editor, mode-specific files in `solvers/`, the answer-table renderer, and
 finally the legacy coordinator. The modules communicate through small
 `window.GSRuntime`, `window.GSSolvers`, and `window.GSRender` namespaces, so
 direct `file://` use remains supported without a bundler.
+
+The dependency-free browser smoke page is `tests.html`; `tests/run.js` is a
+Node-based module-parse smoke harness and requires Node.js to be installed.
 
 | File | Purpose |
 |---|---|
