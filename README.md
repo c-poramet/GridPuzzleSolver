@@ -263,15 +263,21 @@ shortcut labels use `Ctrl/⌘` to mean Ctrl on Windows/Linux and Command on macO
 
 Each category has at most 12 items. There is no fixed 26-category limit;
 performance is the practical constraint. Large grids may show estimates. There
-is no build step or dependency.
+is no build step or dependency. The browser loads `core/runtime.js`, the
+editor, mode-specific files in `solvers/`, the answer-table renderer, and
+finally the legacy coordinator. The modules communicate through small
+`window.GSRuntime`, `window.GSSolvers`, and `window.GSRender` namespaces, so
+direct `file://` use remains supported without a bundler.
 
 | File | Purpose |
 |---|---|
 | `index.html` | Page structure and solver output |
 | `styles.css` | Dark theme and layout |
 | `editor.js` | Highlighting, autocomplete, diagnostics, fixes, Normalize |
+| `core/runtime.js` | Shared escaping and line-numbered runtime errors |
 | `solvers/slots.js` | Mastermind/slots parsing, filtering, and result rendering |
 | `solvers/columns.js` | Repeating/unique column enumeration and clue filtering |
+| `renderers/answer-table.js` | Legacy answer-table rendering |
 | `solver.js` | Legacy parsing, propagation, solving, and mode coordination |
 | `Clue_to_GSL_PROMPT.md` | Prompt for translating grid and supported slots clues |
 | `README.md` | This guide |

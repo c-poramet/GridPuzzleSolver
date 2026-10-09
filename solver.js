@@ -1,15 +1,13 @@
 'use strict';
 window.GSSolvers = window.GSSolvers || {};
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const esc = GSRuntime.esc;
 const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in exactly atleast atmost alldiff allsame total sum avg max min default unit ordered circular unordered each'.split(' '));
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
 const CMP = ['=', '!=', '<', '>', '<=', '>='];
 const SEQ = ['then', 'then+', 'after', 'after+'];
 const MAXN = 12; // items per category
-class E extends Error { constructor(m, l) { super(m); this.line = l; } }
-window.GSError = E;
-window.GSEsc = esc;
+const E = GSRuntime.Error;
 
 /* ───────── SETUP ───────── */
 function parseSetup(L) {
@@ -781,8 +779,6 @@ const DEF_THR = 1, DEF_LM = 10;
 /* ───────── answer table ───────── */
 // ord.o = category indexes; o[0] is the row category, the rest are columns in display order.
 const ORD_KEY = 'gridsolver.order';
-const FALLBACK_COLORS = ['#6ca965', '#6fa3d0', '#a58bc4', '#d27d8f', '#4fb3b3', '#b8a78a'];
-const catColor = i => { const p = window.GSEditor?.PALETTE || FALLBACK_COLORS; return p[i % p.length]; };
 let ans = null, ord = null;
 
 const sigOf = C => C.map(c => c.name + '[' + c.tag + ']').join('|');
@@ -812,35 +808,7 @@ function makeCand(C, certain, leaves, pairs) {
   };
 }
 
-function renderAnswer(focusK) {
-  const box = $('answer');
-  if (!box || !ans || !ord) return;
-  const { C, cand, count, kind } = ans, N = C[0].items.length, rc = ord.o[0], cols = ord.o.slice(1);
-  const sty = c => `--c:${catColor(c)}`;
-  const rowIdx = [...Array(N).keys()];
-  if (C[rc].num) rowIdx.sort((a, b) => C[rc].items[a] - C[rc].items[b]);
-  let unsure = false;
-  const cell = (x, k) => {
-    const v = cand(rc, x, k);
-    if (!v.length) { unsure = true; return '<td class="cell-unk">?</td>'; }
-    if (v.length === 1) return `<td style="${sty(k)}"><span class="cell-v">${esc(C[k].items[v[0]])}</span></td>`;
-    unsure = true;
-    const more = v.length > 3 ? `<span class="cell-more">+${v.length - 3}</span>` : '';
-    return `<td class="cell-amb" style="${sty(k)}">${v.slice(0, 3).map(i => `<span class="cell-v">${esc(C[k].items[i])}</span>`).join('')}${more}</td>`;
-  };
-  const body = rowIdx.map(x => `<tr><th scope="row" style="${sty(rc)}"><span class="cell-v">${esc(C[rc].items[x])}</span></th>${cols.map(k => cell(x, k)).join('')}</tr>`).join('');
-  const head = `<th class="rowhead" style="${sty(rc)}" title="${esc(C[rc].name)} is the row category"><span class="ch-in"><span class="ch-name">${esc(C[rc].name)}</span><span class="ch-tag">[${C[rc].tag}]</span></span></th>` +
-    cols.map((k, p) => `<th class="colhead" draggable="true" tabindex="0" role="button" data-k="${k}" style="${sty(k)}" title="Click: use ${esc(C[k].name)} as the rows · drag to reorder (Alt+←/→)"><span class="ch-in">` +
-      `<button type="button" class="ch-mv" data-d="-1" aria-label="Move ${esc(C[k].name)} left"${p === 0 ? ' disabled' : ''}>‹</button>` +
-      `<span class="ch-name">${esc(C[k].name)}</span><span class="ch-tag">[${C[k].tag}]</span>` +
-      `<button type="button" class="ch-mv" data-d="1" aria-label="Move ${esc(C[k].name)} right"${p === cols.length - 1 ? ' disabled' : ''}>›</button></span></th>`).join('');
-  box.hidden = false;
-  box.innerHTML = `<div class="answer-head"><span class="answer-title${count === 1 && kind === 0 ? '' : ' part'}">${count === 1 && kind === 0 ? 'Solution' : `${fmt(count, kind)} possibilities left`}</span>` +
-    `<span class="answer-hint">Click a header to use it as rows · drag or ‹ › to reorder</span></div>` +
-    `<div class="answer-scroll"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
-    (unsure ? '<div class="answer-note"><b>?</b> not determined yet · several names = still possible</div>' : '');
-  if (focusK != null) box.querySelector(`.colhead[data-k="${focusK}"]`)?.focus();
-}
+const renderAnswer = focusK => GSRender.answerTable({ ans, ord, focusK, saveOrd, renderAgain: renderAnswer, fmt });
 
 const useAsRows = (k, focus) => {
   const i = ord.o.indexOf(k); if (i < 1) return;
