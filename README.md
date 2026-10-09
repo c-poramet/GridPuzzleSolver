@@ -184,6 +184,15 @@ categories, full grid/slots coupling, formula sets, and asynchronous
 best-guess search are not yet implemented; those constructs are highlighted
 and diagnosed by the editor but should not be used as solver input yet.
 
+The editor also recognizes the planned vocabulary for repeating/unique columns
+(`repeat`, `unique`), pools/domains/values, `ROWS`, `SLOTS ON`, and
+product/tuple columns (`product`, `products`, `tuple`, `tuples`, `distinct`).
+These words receive contextual highlighting, autocomplete, and conservative
+diagnostics (with a few removal or `alldiff` quick fixes), but they are not
+implemented by `solver.js`. Use the documented slots declaration and the
+existing grid categories instead; do not expect those experimental forms to
+solve a program.
+
 #### Slots output
 
 Slots results use the same answer-table treatment as grid results. Each

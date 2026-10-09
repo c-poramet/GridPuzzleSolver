@@ -132,11 +132,15 @@ function initSettings() {
 
 /* ───────── language data ───────── */
 const SECTION = ['SETUP', 'START', 'SOLVE'];
-const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT'];
+const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT', 'ROWS'];
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
 const GATES2 = ['before', 'right', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
 const PREFIX = ['each', 'exactly', 'atleast', 'atmost', 'alldiff', 'allsame', 'total', 'sum', 'avg', 'max', 'min'];
 const MODIFIERS = ['ordered', 'circular', 'unordered'];
+// These words are intentionally recognised contextually.  The current solver
+// does not execute pool/product/row declarations, but the editor should explain
+// them instead of reporting a misleading unknown-name error.
+const DATA_WORDS = ['repeat', 'unique', 'pool', 'pools', 'domain', 'domains', 'values', 'value', 'row', 'rows', 'slots', 'on', 'off', 'product', 'products', 'tuple', 'tuples', 'distinct'];
 const SETS = ['DAYS', 'WEEKDAYS', 'MONTHS', 'SEASONS', 'ZODIAC'];
 const RESERVED = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in each exactly atleast atmost alldiff allsame total sum avg max min'.split(' '));
 const PALETTE = ['#6ca965', '#6fa3d0', '#a58bc4', '#d27d8f', '#4fb3b3', '#b8a78a'];
@@ -196,7 +200,8 @@ function analyze(text) {
     }
     if (/^(?:GUESS|FEEDBACK|NEXT_MOVE)\b/i.test(code) || /:=/.test(code)) { L.kind = 'master-game'; return; }
     L.mode = mode;
-    if (/^(THRESHOLD|LISTMAX)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
+    if (/^(THRESHOLD|LISTMAX|ROWS)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
+    if (/^(?:SLOTS\s+(?:ON|OFF)|(?:POOL|POOLS|DOMAIN|DOMAINS|VALUES|PRODUCTS?|TUPLES?)\b)/i.test(code)) { L.kind = 'feature'; return; }
     if (mode === 0) { L.kind = 'stray'; return; }
     if (mode === 1) {
       const m = code.match(/^(\S+)\s*(?:\[([^\]]*)\])?\s*(.*)$/);
@@ -247,9 +252,28 @@ function analyze(text) {
       case 'stray': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Begin with SETUP', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'catbad': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Expected: name [tag] items…', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'set': {
-        const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
+        const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX|ROWS)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
         let p = 0;
         [[m[1], ''], [m[2], 't-set'], [m[3], ''], [m[4], 't-op'], [m[5], ''], [m[6], 't-num'], [m[7], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
+        if (/^ROWS$/i.test(m[2])) {
+          const at = code.indexOf(m[2]);
+          L.issues.push({ s: at, e: at + m[2].length, msg: 'ROWS is reserved for experimental product/tuple columns and is not executed by the current solver', fixes: [{ label: 'Comment out ROWS setting', edits: [{ line: i + 1, start: 1, end: l.length + 1, text: `// ${l}` }] }] });
+        }
+        break;
+      }
+      case 'feature': {
+        tk(L, 0, lead, '');
+        const words = /\S+/g; let q;
+        while ((q = words.exec(core))) {
+          const w = q[0], at = lead.length + q.index;
+          const known = DATA_WORDS.includes(w.toLowerCase());
+          if (known) {
+            tk(L, at, w, /^(?:on|off|slots)$/i.test(w) ? 't-kw' : 't-set');
+            if (/^(?:pool|pools|domain|domains|values|products?|tuples?)$/i.test(w)) {
+              L.issues.push({ s: at, e: at + w.length, msg: `${w} declarations are editor-only; solver input does not support them yet`, fixes: [{ label: 'Comment out unsupported declaration', edits: [{ line: i + 1, start: 1, end: l.length + 1, text: `// ${l}` }] }] });
+            }
+          } else tk(L, at, w, 't-ent');
+        }
         break;
       }
       case 'cat': {
@@ -276,7 +300,11 @@ function analyze(text) {
         while ((r = re.exec(rest))) {
           tk(L, p + last, rest.slice(last, r.index), ''); last = r.index + r[0].length;
           const w = r[0], at = p + r.index;
-          if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step)$/i.test(w)) { tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw'); continue; }
+          if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step|repeat|unique)$/i.test(w)) {
+            tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw');
+            if (/^(repeat|unique)$/i.test(w)) L.issues.push({ s: at, e: at + w.length, msg: `Column repetition mode is not part of SETUP categories; use slots mode for repeat/unique`, fixes: [{ label: 'Remove repetition modifier', edits: [{ line: i + 1, start: at + 1, end: at + w.length + 1, text: '' }] }] });
+            continue;
+          }
           let msg = '';
           if (!c.num) {
             if (!/^(?:"(?:\\"|[^"])*"|[A-Za-z][A-Za-z0-9_]*|[-+]?\d+(?:\.\d+)?)$/.test(w)) msg = `Bad item name "${w}"`;
@@ -344,6 +372,15 @@ function analyze(text) {
           }
           if (GATES.includes(lw) || lw === 'not') { tk(L, t.s, w, 't-gate'); return; }
           if (GATES2.includes(lw) || PREFIX.includes(lw) || MODIFIERS.includes(lw) || SETS.includes(w.toUpperCase()) || ['step', 'default', 'unit'].includes(lw)) { tk(L, t.s, w, 't-kw'); return; }
+          if (DATA_WORDS.includes(lw)) {
+            const replacement = lw === 'distinct' ? 'alldiff' : '';
+            const unsupported = /^(?:repeat|unique|pool|pools|domain|domains|values|value|row|rows|slots|on|off|product|products|tuple|tuples|distinct)$/.test(lw);
+            if (unsupported) {
+              const fixes = replacement ? [{ label: 'Use alldiff instead', edits: [{ line: i + 1, start: t.s + 1, end: t.s + w.length + 1, text: replacement }] }] : [];
+              bad(L, t.s, w, `${w} is not a value expression supported by the solver here`, 't-kw', { fixes });
+            } else tk(L, t.s, w, 't-kw');
+            return;
+          }
           if (lw === 'then') { tk(L, t.s, w, 't-kw'); return; }
           if (lw === 'of') {
             const p = t.prev;
@@ -692,6 +729,7 @@ function completion(manual) {
   if (atStart) {
     SECTION.forEach(s => sec.push({ label: s, insert: s === 'SOLVE' ? s : s + '\n', detail: 'section', color: SEC_COLOR }));
     SETTINGS.forEach(s => sec.push({ label: s, insert: s + ' = ', detail: 'setting', color: SEC_COLOR }));
+    ['SLOTS ON', 'SLOTS OFF', 'POOL', 'DOMAIN', 'VALUES', 'PRODUCT', 'TUPLES'].forEach(s => sec.push({ label: s, insert: s + ' ', detail: 'experimental/editor hint', color: KW_COLOR }));
   }
   const addSec = base => {
     if (mode === 1 && !manual && prefix.length < 2) return;
@@ -701,12 +739,19 @@ function completion(manual) {
   if (mode === 0) addSec(0);
   else if (mode === 1) {
     addSec(0);
+    DATA_WORDS.filter(w => /^(repeat|unique|ordered|circular|unordered)$/.test(w)).forEach(w => {
+      const r = matchRank(w, pl); if (r >= 0) list.push({ it: { label: w, insert: w + ' ', detail: 'column/category modifier', color: KW_COLOR }, r });
+    });
     if (!atStart && (prefix.startsWith('.') || (manual && !prefix))) list.push({ it: { label: '...', insert: '... ', detail: 'continue the number step', color: SEC_COLOR }, r: 0 });
   } else {
     if (atStart) {
       gameWords.forEach(([label, detail]) => {
         const r = matchRank(label, pl);
         if (r >= 0) list.push({ it: { label, insert: label + ' ', detail, color: label === 'NEXT_MOVE' ? SEC_COLOR : GATE_COLOR }, r: r - 0.2 });
+      });
+      DATA_WORDS.forEach(word => {
+        const r = matchRank(word, pl);
+        if (r >= 0 && r < 2) list.push({ it: { label: word, insert: word + ' ', detail: 'editor-recognised feature (not solver syntax)', color: KW_COLOR }, r: r + 0.2 });
       });
     }
     if (L.kind === 'master-game' || /(?:GUESS|FEEDBACK|NEXT_MOVE)\s*$/i.test(beforeC)) {

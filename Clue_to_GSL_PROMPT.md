@@ -107,6 +107,14 @@ these are planned language features, not supported translation targets in the
 current runtime. If the source requires one of them, mention it in Notes rather
 than silently approximating it.
 
+Likewise, do not emit experimental repeating/unique product-column syntax,
+pool/domain/values declarations, `ROWS`, `SLOTS ON`, or product/tuple
+(`product`, `products`, `tuple`, `tuples`, `distinct`) forms. The editor
+highlights and suggests this vocabulary so future programs are easier to
+inspect, and may offer a conservative quick fix, but `solver.js` does not
+execute it. Translate supported clues with ordinary categories or the slots
+declaration above; mention any required experimental construct in Notes.
+
 # SETUP RULES
 - Category name: one unquoted word, or a quoted name when needed; it must not be
   a reserved word.
