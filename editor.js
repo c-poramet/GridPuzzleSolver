@@ -132,11 +132,15 @@ function initSettings() {
 
 /* ───────── language data ───────── */
 const SECTION = ['SETUP', 'START', 'SOLVE'];
-const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT'];
+const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT', 'ROWS'];
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
-const GATES2 = ['before', 'right', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
+const GATES2 = ['before', 'after', 'right', 'then', 'then+', 'after+', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
 const PREFIX = ['each', 'exactly', 'atleast', 'atmost', 'alldiff', 'allsame', 'total', 'sum', 'avg', 'max', 'min'];
 const MODIFIERS = ['ordered', 'circular', 'unordered'];
+// These words are intentionally recognised contextually.  The current solver
+// does not execute pool/product/row declarations, but the editor should explain
+// them instead of reporting a misleading unknown-name error.
+const DATA_WORDS = ['repeat', 'unique', 'pool', 'pools', 'domain', 'domains', 'values', 'value', 'row', 'rows', 'slots', 'on', 'off', 'product', 'products', 'tuple', 'tuples', 'distinct'];
 const SETS = ['DAYS', 'WEEKDAYS', 'MONTHS', 'SEASONS', 'ZODIAC'];
 const RESERVED = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in each exactly atleast atmost alldiff allsame total sum avg max min'.split(' '));
 const PALETTE = ['#6ca965', '#6fa3d0', '#a58bc4', '#d27d8f', '#4fb3b3', '#b8a78a'];
@@ -177,6 +181,7 @@ function analyze(text) {
   const raw = text.split('\n');
   const lines = raw.map(() => ({ kind: 'blank', mode: 0, toks: [], issues: [] }));
   const cats = [];
+  const master = { declarations: [], guesses: [] };
   let mode = 0;
 
   // pass 1: sections + categories
@@ -187,13 +192,28 @@ function analyze(text) {
     if (u === 'SETUP') { mode = 1; L.kind = 'sec'; L.mode = 1; return; }
     if (u === 'START') { mode = 2; L.kind = 'sec'; L.mode = 2; return; }
     if (u === 'SOLVE') { mode = 3; L.kind = 'sec'; L.mode = 3; return; }
+    const decl = code.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(\d+)\s+slots?\s+from\s+(.+?)(?:\s+(unique|repeat))?$/i);
+    if (decl) {
+      const range = decl[3].match(/^(-?\d+)\s*\.\.\.?\s*(-?\d+)$/);
+      L.kind = 'master-decl'; L.master = { name: decl[1], count: +decl[2], source: decl[3], min: range ? +range[1] : null, max: range ? +range[2] : null, mode: decl[4] || 'repeat', line: i };
+      master.declarations.push(L.master); return;
+    }
+    if (/^(?:GUESS|FEEDBACK|NEXT_MOVE)\b/i.test(code) || /:=/.test(code)) { L.kind = 'master-game'; return; }
     L.mode = mode;
-    if (/^(THRESHOLD|LISTMAX)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
+    if (/^(THRESHOLD|LISTMAX|ROWS)\s*=\s*\d+$/i.test(code) || /^(?:DEFAULT\s+UNIT|UNIT)\s*=\s*[A-Za-z][A-Za-z0-9_]*$/i.test(code)) { L.kind = 'set'; return; }
+    if (/^(?:SLOTS\s+(?:ON|OFF)|(?:POOL|POOLS|DOMAIN|DOMAINS|VALUES|PRODUCTS?|TUPLES?)\b)/i.test(code)) { L.kind = 'feature'; return; }
     if (mode === 0) { L.kind = 'stray'; return; }
     if (mode === 1) {
       const m = code.match(/^(\S+)\s*(?:\[([^\]]*)\])?\s*(.*)$/);
       if (!m) { L.kind = 'catbad'; return; }
-      const cat = { name: m[1], tag: m[2], tokens: m[3].split(/\s+/).filter(Boolean), line: i, color: PALETTE[cats.length % PALETTE.length] };
+      let tokens = m[3].split(/\s+/).filter(Boolean), columnMode = '';
+      if (/^(repeat|unique)$/i.test(tokens[0] || '')) columnMode = tokens.shift().toLowerCase();
+      else if (/^slots$/i.test(tokens[0] || '') && /^on$/i.test(tokens[1] || '')) {
+        columnMode = /^(repeat|unique)$/i.test(tokens.at(-1) || '') ? tokens.pop().toLowerCase() : 'repeat';
+        const from = tokens.findIndex(x => /^from$/i.test(x));
+        tokens = from >= 0 ? tokens.slice(from + 1) : []; // on <row> from <alphabet>
+      }
+      const cat = { name: m[1], tag: m[2], tokens, columnMode, line: i, color: PALETTE[cats.length % PALETTE.length] };
       cats.push(cat); L.kind = 'cat'; L.cat = cat; return;
     }
     L.kind = 'clue';
@@ -239,9 +259,24 @@ function analyze(text) {
       case 'stray': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Begin with SETUP', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'catbad': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Expected: name [tag] items…', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'set': {
-        const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
+        const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX|ROWS)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
         let p = 0;
         [[m[1], ''], [m[2], 't-set'], [m[3], ''], [m[4], 't-op'], [m[5], ''], [m[6], 't-num'], [m[7], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
+        break;
+      }
+      case 'feature': {
+        tk(L, 0, lead, '');
+        const words = /\S+/g; let q;
+        while ((q = words.exec(core))) {
+          const w = q[0], at = lead.length + q.index;
+          const known = DATA_WORDS.includes(w.toLowerCase());
+          if (known) {
+            tk(L, at, w, /^(?:on|off|slots)$/i.test(w) ? 't-kw' : 't-set');
+            if (/^(?:pool|pools|domain|domains|values|products?|tuples?)$/i.test(w)) {
+              L.issues.push({ s: at, e: at + w.length, msg: `${w} declarations are editor-only; solver input does not support them yet`, fixes: [{ label: 'Comment out unsupported declaration', edits: [{ line: i + 1, start: 1, end: l.length + 1, text: `// ${l}` }] }] });
+            }
+          } else tk(L, at, w, 't-ent');
+        }
         break;
       }
       case 'cat': {
@@ -268,7 +303,10 @@ function analyze(text) {
         while ((r = re.exec(rest))) {
           tk(L, p + last, rest.slice(last, r.index), ''); last = r.index + r[0].length;
           const w = r[0], at = p + r.index;
-          if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step)$/i.test(w)) { tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw'); continue; }
+          if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step|repeat|unique)$/i.test(w)) {
+            tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw');
+            continue;
+          }
           let msg = '';
           if (!c.num) {
             if (!/^(?:"(?:\\"|[^"])*"|[A-Za-z][A-Za-z0-9_]*|[-+]?\d+(?:\.\d+)?)$/.test(w)) msg = `Bad item name "${w}"`;
@@ -279,6 +317,40 @@ function analyze(text) {
           if (msg) bad(L, at, w, msg, 't-item', { style }); else tk(L, at, w, 't-item', { style });
         }
         tk(L, p + last, rest.slice(last), '');
+        break;
+      }
+      case 'master-decl': {
+        const m = code.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s+)(\d+)(\s+slots?)(\s+from\s+)(.+?)(?:\s+(unique|repeat))?(\s*)$/i);
+        let p = 0;
+        [[m[1], ''], [m[2], 't-slot'], [m[3], ''], [m[4], 't-num'], [m[5], 't-kw'], [m[6], 't-kw'], [m[7], 't-ent'], [m[8] || '', 't-kw'], [m[9], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
+        const d = L.master;
+        if (d.count < 1 || d.count > 12) bad(L, code.indexOf(m[4]), m[4], 'Slot count must be between 1 and 12', 't-num');
+        if (d.min != null && d.min > d.max) bad(L, code.indexOf(m[7]), m[7], 'Range must ascend from min to max', 't-num');
+        break;
+      }
+      case 'master-game': {
+        tk(L, 0, lead, '');
+        const m = code.match(/^(\s*)(GUESS|FEEDBACK|NEXT_MOVE)\b(.*)$/i);
+        if (!m) {
+          const g = code.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*\s+)?(.+?)\s*(:=)\s*(.*)$/i);
+          if (!g) { bad(L, 0, code, 'Expected a GUESS, FEEDBACK, NEXT_MOVE, or := guess', 't-id'); break; }
+          const name = g[2] || '', guess = g[3], opAt = code.indexOf(':=', g[1].length);
+          if (name) tk(L, g[1].length, name, 't-slot');
+          tk(L, g[1].length + name.length, guess, 't-ent'); tk(L, opAt, ':=', 't-op'); tk(L, opAt + 2, g[5], 't-gate');
+          master.guesses.push(guess); break;
+        }
+        const keyword = m[2].toUpperCase(), rest = m[3], off = m[1].length + m[2].length;
+        tk(L, m[1].length, m[2], keyword === 'NEXT_MOVE' ? 't-sec' : 't-gate');
+        if (!rest.trim()) { bad(L, off, rest, `${keyword} needs a value`, 't-id'); break; }
+        const rr = /\S+/g; let q;
+        while ((q = rr.exec(rest))) {
+          const w = q[0], at = off + q.index;
+          if (/^slot(?:\(\d+\)|\[\d+\])$/i.test(w) || /^slot\d+$/i.test(w)) tk(L, at, w, 't-slot');
+          else if (keyword === 'NEXT_MOVE') tk(L, at, w, 't-sec');
+          else if (keyword === 'FEEDBACK' && /^(?:exact|misplaced|correct|present|absent|black|white|green|yellow|gray|grey|\d+)[,;:]?$/i.test(w)) tk(L, at, w, /^\d/.test(w) ? 't-num' : 't-ent');
+          else if (keyword === 'GUESS' && /^\d+$/.test(w)) tk(L, at, w, 't-ent');
+          else bad(L, at, w, keyword === 'FEEDBACK' ? 'Expected feedback counts or exact/misplaced markers' : `Unexpected ${keyword} value`, 't-id');
+        }
         break;
       }
       case 'clue': {
@@ -296,8 +368,16 @@ function analyze(text) {
             case 'other': bad(L, t.s, t.t, `Unexpected character "${t.t}"`, 't-id'); return;
           }
           const w = t.t, lw = w.toLowerCase();
+          if (/^slot(?:\(\d+\)|\[\d+\])$/i.test(w) || /^slot\d+$/i.test(w)) {
+            tk(L, t.s, w, 't-slot');
+            return;
+          }
           if (GATES.includes(lw) || lw === 'not') { tk(L, t.s, w, 't-gate'); return; }
           if (GATES2.includes(lw) || PREFIX.includes(lw) || MODIFIERS.includes(lw) || SETS.includes(w.toUpperCase()) || ['step', 'default', 'unit'].includes(lw)) { tk(L, t.s, w, 't-kw'); return; }
+          if (DATA_WORDS.includes(lw)) {
+            tk(L, t.s, w, 't-kw');
+            return;
+          }
           if (lw === 'then') { tk(L, t.s, w, 't-kw'); return; }
           if (lw === 'of') {
             const p = t.prev;
@@ -314,11 +394,15 @@ function analyze(text) {
             const c = tagMap.get(m[2]);
             if (!c || (!c.num && !c.ordered)) { bad(L, t.s, w, `"${m[2]}" is not an order-capable tag`, 't-num'); return; }
             const valid = c.num ? c.valSet.has(+m[1]) : Number.isInteger(+m[1]) && +m[1] >= 1 && +m[1] <= c.items.length;
-            if (!valid) { bad(L, t.s, w, `${m[1]} is not a value of ${c.name} (${c.items.join(', ')})`, 't-num'); return; }
-            tk(L, t.s, w, 't-ent', { style: '--c:' + c.color, parts: [m[1], m[2]] });
+            tk(L, t.s, w, valid ? 't-ent' : 't-num', { style: '--c:' + c.color, parts: [m[1], m[2]] });
             return;
           }
           if (!have) { tk(L, t.s, w, 't-id'); return; }
+          const access = w.match(/^(.+)\.([A-Za-z_]\w*)$/);
+          if (access && (cats.some(c => c.items.some(it => String(it).toLowerCase() === access[1].toLowerCase())) || /^\d+\w+$/.test(access[1]))) {
+            const component = cats.find(c => c.name.toLowerCase() === access[2].toLowerCase() || c.tag.toLowerCase() === access[2].toLowerCase());
+            if (component) { tk(L, t.s, w, 't-ent', { style: '--c:' + component.color }); return; }
+          }
           if (/^[a-z]+$/.test(w)) {
             const c = tagMap.get(w) || cats.find(x => x.name.toLowerCase() === lw);
             if (!c) bad(L, t.s, w, `Unknown tag "${w}"`, 't-id');
@@ -343,7 +427,7 @@ function analyze(text) {
     if (ci >= 0) tk(L, ci, l.slice(ci), 't-cmt');
   });
 
-  return { lines, cats, tagMap, N };
+  return { lines, cats, tagMap, N, master };
 }
 
 /* ───────── state + metrics ───────── */
@@ -550,7 +634,10 @@ function dupLines(dir) {
    the installed solver cannot parse untouched. */
 function normalizeLines() {
   const { s, e } = lineRange(), source = ta.value.slice(s, e);
+  const row = (ta.value.match(/^\s*([A-Za-z_]\w*)(?:\s+\[[a-z]+\])?\s+(?!repeat\b|unique\b|slots\b|domain\b|pool\b|values\b)\S+/im) || [])[1] || 'order';
   const out = source.split('\n').map(line => line
+    .replace(/^(\s*)([A-Za-z_]\w*)(\s+\[[a-z]+\])?\s+(repeat|unique)\s+(.+)$/i, (_, lead, name, tag, mode, values) => `${lead}${name}${tag || ''} slots on ${row} from ${values} ${mode.toLowerCase()}`)
+    .replace(/^(\s*)([A-Za-z_]\w*)(\s+)(pool|values)\b/i, '$1$2$3domain')
     .replace(/(?<!\.)\.\.(?!\.)/g, '...')
     .replace(/\badj\b/gi, 'beside')
     .replace(/\bUNIT\s*=/gi, 'DEFAULT UNIT =')
@@ -613,6 +700,10 @@ function completion(manual) {
   const full = v.slice(c.ls, le), beforeC = full.slice(0, c.col), after = full.slice(c.col);
   if (beforeC.includes('//')) return null;
   const mode = L.mode;
+  const gameWords = [
+    ['GUESS', 'submit a guess'], ['FEEDBACK', 'record feedback'],
+    ['NEXT_MOVE', 'show the next-move status'], ['code', 'declare code length and range']
+  ];
 
   // tag letters inside [ ] on a SETUP line
   if (mode === 1) {
@@ -642,6 +733,7 @@ function completion(manual) {
   if (atStart) {
     SECTION.forEach(s => sec.push({ label: s, insert: s === 'SOLVE' ? s : s + '\n', detail: 'section', color: SEC_COLOR }));
     SETTINGS.forEach(s => sec.push({ label: s, insert: s + ' = ', detail: 'setting', color: SEC_COLOR }));
+    ['SLOTS ON', 'SLOTS OFF', 'POOL', 'DOMAIN', 'VALUES', 'PRODUCT', 'TUPLES'].forEach(s => sec.push({ label: s, insert: s + ' ', detail: 'experimental/editor hint', color: KW_COLOR }));
   }
   const addSec = base => {
     if (mode === 1 && !manual && prefix.length < 2) return;
@@ -651,8 +743,32 @@ function completion(manual) {
   if (mode === 0) addSec(0);
   else if (mode === 1) {
     addSec(0);
+    DATA_WORDS.filter(w => /^(repeat|unique|ordered|circular|unordered)$/.test(w)).forEach(w => {
+      const r = matchRank(w, pl); if (r >= 0) list.push({ it: { label: w, insert: w + ' ', detail: 'column/category modifier', color: KW_COLOR }, r });
+    });
     if (!atStart && (prefix.startsWith('.') || (manual && !prefix))) list.push({ it: { label: '...', insert: '... ', detail: 'continue the number step', color: SEC_COLOR }, r: 0 });
   } else {
+    if (atStart) {
+      gameWords.forEach(([label, detail]) => {
+        const r = matchRank(label, pl);
+        if (r >= 0) list.push({ it: { label, insert: label + ' ', detail, color: label === 'NEXT_MOVE' ? SEC_COLOR : GATE_COLOR }, r: r - 0.2 });
+      });
+      DATA_WORDS.forEach(word => {
+        const r = matchRank(word, pl);
+        if (r >= 0 && r < 2) list.push({ it: { label: word, insert: word + ' ', detail: 'editor-recognised feature (not solver syntax)', color: KW_COLOR }, r: r + 0.2 });
+      });
+    }
+    if (L.kind === 'master-game' || /(?:GUESS|FEEDBACK|NEXT_MOVE)\s*$/i.test(beforeC)) {
+      const vals = /^\s*NEXT_MOVE/i.test(full)
+        ? ['READY', 'PENDING', 'BLOCKED', 'DONE', 'UNKNOWN', 'WAITING']
+        : /^\s*FEEDBACK/i.test(full)
+          ? ['exact', 'misplaced', 'correct', 'present', 'absent']
+          : A.master.declarations.flatMap(d => Array.from({ length: Math.min(d.count, 12) }, (_, i) => `slot${i + 1}`));
+      vals.forEach(label => {
+        const r = matchRank(label, pl);
+        if (r >= 0) list.push({ it: { label, insert: label + ' ', detail: /^slot/i.test(label) ? 'slot reference' : 'status/feedback', color: /^slot/i.test(label) ? 'var(--text-sec)' : SEC_COLOR }, r });
+      });
+    }
     const valueStart = atStart || isOp || GATES.includes(ptl) || ptl === 'not' || ptl === 'of' || ptl === 'then';
     const afterValue = !valueStart && prevTok !== '';
     if (A.tagMap.has(prevTok)) {
