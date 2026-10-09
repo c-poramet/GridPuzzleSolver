@@ -206,7 +206,14 @@ function analyze(text) {
     if (mode === 1) {
       const m = code.match(/^(\S+)\s*(?:\[([^\]]*)\])?\s*(.*)$/);
       if (!m) { L.kind = 'catbad'; return; }
-      const cat = { name: m[1], tag: m[2], tokens: m[3].split(/\s+/).filter(Boolean), line: i, color: PALETTE[cats.length % PALETTE.length] };
+      let tokens = m[3].split(/\s+/).filter(Boolean), columnMode = '';
+      if (/^(repeat|unique)$/i.test(tokens[0] || '')) columnMode = tokens.shift().toLowerCase();
+      else if (/^slots$/i.test(tokens[0] || '') && /^on$/i.test(tokens[1] || '')) {
+        columnMode = /^(repeat|unique)$/i.test(tokens.at(-1) || '') ? tokens.pop().toLowerCase() : 'repeat';
+        const from = tokens.findIndex(x => /^from$/i.test(x));
+        tokens = from >= 0 ? tokens.slice(from + 1) : []; // on <row> from <alphabet>
+      }
+      const cat = { name: m[1], tag: m[2], tokens, columnMode, line: i, color: PALETTE[cats.length % PALETTE.length] };
       cats.push(cat); L.kind = 'cat'; L.cat = cat; return;
     }
     L.kind = 'clue';
@@ -255,10 +262,6 @@ function analyze(text) {
         const m = code.match(/^(\s*)(DEFAULT\s+UNIT|UNIT|THRESHOLD|LISTMAX|ROWS)(\s*)(=)(\s*)(\d+|[A-Za-z][A-Za-z0-9_]*)(\s*)$/i);
         let p = 0;
         [[m[1], ''], [m[2], 't-set'], [m[3], ''], [m[4], 't-op'], [m[5], ''], [m[6], 't-num'], [m[7], '']].forEach(([t, c]) => { tk(L, p, t, c); p += t.length; });
-        if (/^ROWS$/i.test(m[2])) {
-          const at = code.indexOf(m[2]);
-          L.issues.push({ s: at, e: at + m[2].length, msg: 'ROWS is reserved for experimental product/tuple columns and is not executed by the current solver', fixes: [{ label: 'Comment out ROWS setting', edits: [{ line: i + 1, start: 1, end: l.length + 1, text: `// ${l}` }] }] });
-        }
         break;
       }
       case 'feature': {
@@ -302,7 +305,6 @@ function analyze(text) {
           const w = r[0], at = p + r.index;
           if (w === '...' || w === '..' || SETS.includes(w.toUpperCase()) || /^(ordered|circular|unordered|step|repeat|unique)$/i.test(w)) {
             tk(L, at, w, w === '...' || w === '..' ? 't-dots' : 't-kw');
-            if (/^(repeat|unique)$/i.test(w)) L.issues.push({ s: at, e: at + w.length, msg: `Column repetition mode is not part of SETUP categories; use slots mode for repeat/unique`, fixes: [{ label: 'Remove repetition modifier', edits: [{ line: i + 1, start: at + 1, end: at + w.length + 1, text: '' }] }] });
             continue;
           }
           let msg = '';
@@ -373,12 +375,7 @@ function analyze(text) {
           if (GATES.includes(lw) || lw === 'not') { tk(L, t.s, w, 't-gate'); return; }
           if (GATES2.includes(lw) || PREFIX.includes(lw) || MODIFIERS.includes(lw) || SETS.includes(w.toUpperCase()) || ['step', 'default', 'unit'].includes(lw)) { tk(L, t.s, w, 't-kw'); return; }
           if (DATA_WORDS.includes(lw)) {
-            const replacement = lw === 'distinct' ? 'alldiff' : '';
-            const unsupported = /^(?:repeat|unique|pool|pools|domain|domains|values|value|row|rows|slots|on|off|product|products|tuple|tuples|distinct)$/.test(lw);
-            if (unsupported) {
-              const fixes = replacement ? [{ label: 'Use alldiff instead', edits: [{ line: i + 1, start: t.s + 1, end: t.s + w.length + 1, text: replacement }] }] : [];
-              bad(L, t.s, w, `${w} is not a value expression supported by the solver here`, 't-kw', { fixes });
-            } else tk(L, t.s, w, 't-kw');
+            tk(L, t.s, w, 't-kw');
             return;
           }
           if (lw === 'then') { tk(L, t.s, w, 't-kw'); return; }
@@ -402,6 +399,11 @@ function analyze(text) {
             return;
           }
           if (!have) { tk(L, t.s, w, 't-id'); return; }
+          const access = w.match(/^(.+)\.([A-Za-z_]\w*)$/);
+          if (access && (cats.some(c => c.items.some(it => String(it).toLowerCase() === access[1].toLowerCase())) || /^\d+\w+$/.test(access[1]))) {
+            const component = cats.find(c => c.name.toLowerCase() === access[2].toLowerCase() || c.tag.toLowerCase() === access[2].toLowerCase());
+            if (component) { tk(L, t.s, w, 't-ent', { style: '--c:' + component.color }); return; }
+          }
           if (/^[a-z]+$/.test(w)) {
             const c = tagMap.get(w) || cats.find(x => x.name.toLowerCase() === lw);
             if (!c) bad(L, t.s, w, `Unknown tag "${w}"`, 't-id');
@@ -633,7 +635,10 @@ function dupLines(dir) {
    the installed solver cannot parse untouched. */
 function normalizeLines() {
   const { s, e } = lineRange(), source = ta.value.slice(s, e);
+  const row = (ta.value.match(/^\s*([A-Za-z_]\w*)(?:\s+\[[a-z]+\])?\s+(?!repeat\b|unique\b|slots\b|domain\b|pool\b|values\b)\S+/im) || [])[1] || 'order';
   const out = source.split('\n').map(line => line
+    .replace(/^(\s*)([A-Za-z_]\w*)(\s+\[[a-z]+\])?\s+(repeat|unique)\s+(.+)$/i, (_, lead, name, tag, mode, values) => `${lead}${name}${tag || ''} slots on ${row} from ${values} ${mode.toLowerCase()}`)
+    .replace(/^(\s*)([A-Za-z_]\w*)(\s+)(pool|values)\b/i, '$1$2$3domain')
     .replace(/(?<!\.)\.\.(?!\.)/g, '...')
     .replace(/\badj\b/gi, 'beside')
     .replace(/\bUNIT\s*=/gi, 'DEFAULT UNIT =')

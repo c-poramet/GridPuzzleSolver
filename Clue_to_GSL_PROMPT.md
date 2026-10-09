@@ -107,13 +107,15 @@ these are planned language features, not supported translation targets in the
 current runtime. If the source requires one of them, mention it in Notes rather
 than silently approximating it.
 
-Likewise, do not emit experimental repeating/unique product-column syntax,
-pool/domain/values declarations, `ROWS`, `SLOTS ON`, or product/tuple
-(`product`, `products`, `tuple`, `tuples`, `distinct`) forms. The editor
-highlights and suggests this vocabulary so future programs are easier to
-inspect, and may offer a conservative quick fix, but `solver.js` does not
-execute it. Translate supported clues with ordinary categories or the slots
-declaration above; mention any required experimental construct in Notes.
+Use repeating columns for objects with attributes such as cards, tiles, coins,
+or rows where several objects may share an attribute. Declare them with
+`repeat`/`unique`, or with `slots on`; use `domain`/`pool`/`values` for an
+alphabet and `*` for products. Never compare two bare values with `=` or
+`!=`: a value is not a row. Use a row-scoped conjunction (for example
+`some i in order: card[i] = King and suit[i] = Spade`) or `has`/`lacks`.
+Order words applied to bare values are existential: `King before Queen` means
+some King is before some Queen. Product values use `(King, Heart)` and
+components use `hand[1].card` or `hand[1].suit`.
 
 # SETUP RULES
 - Category name: one unquoted word, or a quoted name when needed; it must not be

@@ -85,7 +85,12 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
     const txt = $('src').value, raw = txt.split('\n');
     if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
-    if (L.some(x=>/^\w+\s+(?:repeat|unique)\s+/i.test(x.t)) && GSSolvers.runRepeating(L,out)) return;
+    const setupLines = L.slice(0, L.findIndex(x => /^START$/i.test(x.t)) < 0 ? L.length : L.findIndex(x => /^START$/i.test(x.t)))
+      .filter(x => !/^(?:SETUP|ROWS|THRESHOLD|LISTMAX)\b/i.test(x.t));
+    const unequalSetup = setupLines.length > 1 && !setupLines.some(x => /\.\.+/.test(x.t))
+      && new Set(setupLines.map(x => x.t.split(/\s+/).length)).size > 1;
+    if ((unequalSetup || L.some(x=>/^\w+(?:\s+\[[a-z]+\])?\s+(?:(?:repeat|unique)\s+|slots\s+on\s+|(?:domain|pool|values)\b)/i.test(x.t)) || L.some(x => /^ROWS\b/i.test(x.t)))
+      && GSSolvers.runRepeating(L,out)) return;
     // A slots declaration switches to the additive Mastermind/slots engine.
     // Detect it before the SETUP/START parser so ordinary grid programs remain
     // byte-for-byte compatible with their previous path.

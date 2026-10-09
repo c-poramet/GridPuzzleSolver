@@ -90,6 +90,10 @@ writing a bare category tag such as `o`, which is reserved for `o of X`.
 | Value distance | `A ~ B = 2` | `A apart B = 2` |
 | All different | `alldiff A B C` | `all different A B C` |
 | Exactly N statements | `N of (...)` | `exactly N of (...)` |
+| Repeating attribute | `card repeat King Queen` | `card slots on order from King Queen` |
+| Unique attribute | `pet unique Cat Dog Fish` | `pet slots on friend from Cat Dog Fish unique` |
+| Value pool | `card domain King Queen` | `card pool King Queen` |
+| Distinct tuples | `distinct card suit` | `distinct card suit` |
 | At least / at most | `N+ of (...)` / `N- of (...)` | `atleast N of (...)` / `atmost N of (...)` |
 | Default unit | `UNIT = d` | `DEFAULT UNIT = d` |
 | Total | `sum(A B)` | `total(A B)` |
@@ -150,6 +154,54 @@ Braced sets support equality and membership: `{A B} = {C D}`, `A in {B C}`, and 
 
 `total`/`sum`, `avg`, `max`, and `min` accept space- or comma-separated expressions. Bare `max`/`min` means the unit extreme. A subject block is one step: `Ann: Cat, != 1, before Bob`; bare parts mean equality and are joined with `and`. Given rows are therefore concise without changing step numbering.
 
+### Repeating, unique and product columns
+
+Columns can be attached to rows without pretending that their values form a
+second row category:
+
+```
+SETUP
+order 1 2 3
+card repeat King Queen
+suit repeat Spade Heart
+START
+King before Queen
+distinct card suit
+```
+
+`repeat` permits the same value in several rows. `unique` assigns different
+values and leaves surplus values unused. The equivalent long spelling is
+`card slots on order from King Queen`; `repeat` is the default for `slots on`.
+The row count comes from plain categories, or can be pinned with `ROWS 3` (or
+`ROWS order`). A plain category with a different size is never guessed: mark it
+`repeat` when it is the smaller alphabet, or `unique` when it is larger.
+`unique` needs at least as many values as there are rows.
+
+Values and rows are different things. `card[2] = Queen`, `1o = King`, and
+`Ann.card = King` address a cell. Two bare values such as `King = Spade` are
+not compared; write a row-scoped conjunction (or use `has`/`lacks`). Bare
+values in order words are existential: `King before Queen` means that some row
+holding King precedes some row holding Queen. `card has King x2` and
+`card lacks Queen` count values in a column. `distinct card suit` forbids
+duplicate pairs; it is the safe replacement for `alldiff card suit` when
+columns repeat.
+
+Pools are aliases for a named alphabet and do not create rows:
+
+```
+card domain King Queen
+suit pool Spade Heart
+hand unique card * suit
+```
+
+Products create tuple values such as `(King, Heart)`. The same declaration may
+be written `hand slots on order from card * suit unique`; components are
+available as `hand[1].card` and `hand[1].suit`. A unique product column is a
+dealt hand with no repeated pair. Unused values are shown below the answer
+table; if the solver cannot decide, it reports the remaining candidates.
+Useful recipes include a dealt hand (`card * suit unique`) and tiles that form
+a full set (`distinct colour shape`).
+
 ### Results and editor
 
 Steps show counts, newly certain facts, optional arrangements, and plain-language explanations (hold Shift while hovering). The answer table can be reordered. **Normalize** (`Ctrl/⌘ Alt N`) rewrites selected lines to conservative canonical long spelling; it never runs the solver. Quick fixes use a lightbulb and `Ctrl/⌘ .`; they edit text, preserve undo, and set the badge to `edited`.
@@ -184,14 +236,10 @@ categories, full grid/slots coupling, formula sets, and asynchronous
 best-guess search are not yet implemented; those constructs are highlighted
 and diagnosed by the editor but should not be used as solver input yet.
 
-The editor also recognizes the planned vocabulary for repeating/unique columns
-(`repeat`, `unique`), pools/domains/values, `ROWS`, `SLOTS ON`, and
-product/tuple columns (`product`, `products`, `tuple`, `tuples`, `distinct`).
-These words receive contextual highlighting, autocomplete, and conservative
-diagnostics (with a few removal or `alldiff` quick fixes), but they are not
-implemented by `solver.js`. Use the documented slots declaration and the
-existing grid categories instead; do not expect those experimental forms to
-solve a program.
+The editor recognizes the repeating/unique vocabulary, pool aliases, `ROWS`,
+`SLOTS ON`, products, tuples, and `distinct` contextually. These constructs
+are executed by the row-column engine; ordinary legacy categories continue to
+use the legacy grid engine.
 
 #### Slots output
 
@@ -240,6 +288,10 @@ advanced slots constructs should be removed or commented out before solving.
 | Circular category with linear word | Use `right before`, `beside`, or another circular form |
 | Invalid threshold/list limit | Reset to the default |
 | Contradiction | Comment out the clue after checking earlier clues |
+| Plain category size differs from rows | Mark it `repeat` or `unique` |
+| Unique alphabet is too small | Change `unique` to `repeat` |
+| Bare values compared with `=` | Use a row-scoped existential or `has`/`lacks` |
+| `alldiff` over repeating columns | Rewrite as `distinct ...` |
 
 Every diagnostic includes its source line. Solver errors remain authoritative; the editor is intentionally lightweight and does not solve while typing.
 
@@ -261,7 +313,8 @@ shortcut labels use `Ctrl/⌘` to mean Ctrl on Windows/Linux and Command on macO
 
 ## Limits and files
 
-Each category has at most 12 items. There is no fixed 26-category limit;
+Rows and ordinary categories have at most 12 items; product alphabets are
+capped by the practical row-search budget. There is no fixed 26-category limit;
 performance is the practical constraint. Large grids may show estimates. There
 is no build step or dependency. The browser loads `core/runtime.js`, the
 editor, mode-specific files in `solvers/`, the answer-table renderer, and
@@ -282,6 +335,7 @@ direct `file://` use remains supported without a bundler.
 | `solver.js` | Legacy parsing, propagation, solving, and mode coordination |
 | `Clue_to_GSL_PROMPT.md` | Prompt for translating grid and supported slots clues |
 | `README.md` | This guide |
+| `tests/run.js`, `tests.html` | Dependency-free module and browser smoke checks |
 
 Saved in the browser: puzzle source, editor wrap preference, panel split, answer-table ordering, and the existing localStorage keys. No data is sent anywhere.
 
