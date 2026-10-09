@@ -1,4 +1,5 @@
 'use strict';
+window.GSSolvers = window.GSSolvers || {};
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const KW = new Set('setup start solve threshold listmax proceed of and or xor not nand nor xnor then after before right beside adj between apart within first last at opposite in exactly atleast atmost alldiff allsame total sum avg max min default unit ordered circular unordered each'.split(' '));
@@ -7,6 +8,8 @@ const CMP = ['=', '!=', '<', '>', '<=', '>='];
 const SEQ = ['then', 'then+', 'after', 'after+'];
 const MAXN = 12; // items per category
 class E extends Error { constructor(m, l) { super(m); this.line = l; } }
+window.GSError = E;
+window.GSEsc = esc;
 
 /* ───────── SETUP ───────── */
 function parseSetup(L) {
@@ -775,296 +778,6 @@ const DEF_THR = 1, DEF_LM = 10;
 /* ───────── slots / Mastermind mode ─────────
    This is intentionally separate from the grid solver: a slots program has no
    row permutations, but it can still use the same line-numbered diagnostics. */
-function runSlots(L, out, thr, lm) {
-  const fail = (m, n) => { throw new E(m, n); };
-  const decls = L.map((x, i) => {
-    const m = x.t.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[([a-z]+)\]\s*)?(\d+)\s+slots?\s+from\s+(.+?)\s*(?:(unique|repeat)\s*)?$/i);
-    return m ? { x, i, name: m[1], tag: m[2] || '', n: +m[3], source: m[4].trim(), mode: (m[5] || 'repeat').toLowerCase() } : null;
-  }).filter(Boolean);
-  if (!decls.length) return false;
-  if (decls.length > 1) fail('Only one slots declaration is supported per program', decls[1].x.n);
-  const d = decls[0];
-  if (d.n < 1 || d.n > 12) fail('Slot count must be between 1 and 12', d.x.n);
-  let alpha = [], r = d.source.match(/^(-?\d+(?:\.\d+)?)\s*\.\.\.?\s*(-?\d+(?:\.\d+)?)$/);
-  if (r) {
-    const a = +r[1], b = +r[2];
-    if (a > b || !Number.isInteger(a) || !Number.isInteger(b)) fail('Slot alphabet range must ascend through integer values', d.x.n);
-    if (b - a > 32) fail('Slot alphabet is too large (maximum 33 values)', d.x.n);
-    alpha = Array.from({ length: b - a + 1 }, (_, i) => a + i);
-  } else {
-    const builtin = d.source.toLowerCase();
-    if (builtin === 'digits') alpha = Array.from({ length: 10 }, (_, i) => i);
-    else if (builtin === 'binary') alpha = [0, 1];
-    else if (builtin === 'alphabet' || builtin === 'letters') alpha = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
-    const raw = d.source.replace(/^[\[{]\s*|\s*[\]}]$/g, '').split(/[\s,]+/).filter(Boolean);
-    if (alpha.length) { /* named built-in alphabet */ }
-    else {
-    if (!raw.length) fail('Slots need a non-empty alphabet', d.x.n);
-    alpha = raw.map(v => /^-?\d+(?:\.\d+)?$/.test(v) ? +v : v.replace(/^"|"$/g, ''));
-    if (new Set(alpha.map(String)).size !== alpha.length) fail('Slot alphabet contains duplicates', d.x.n);
-    }
-  }
-  if (d.mode === 'unique' && d.n > alpha.length) fail('Unique slots need at least as many alphabet values as slots', d.x.n);
-  const key = v => typeof v === 'number' ? String(v) : String(v).toLowerCase();
-  const same = (a, b) => key(a) === key(b);
-  const candidates = [];
-  const make = a => {
-    if (a.length === d.n) { candidates.push(a.slice()); return; }
-    for (const v of alpha) if (d.mode !== 'unique' || !a.some(x => same(x, v))) make(a.concat([v]));
-  };
-  make([]);
-  const fmtCode = a => a.map(v => String(v)).join(' ');
-  const parseCode = (s, n) => {
-    let raw = s.replace(/^[=:]\s*/, '').trim().replace(/^[\[(]|[\])]$/g, '').split(/[\s,]+/).filter(Boolean);
-    if (raw.length === 1 && n > 1 && raw[0].length === n && alpha.every(v => String(v).length === 1)) raw = raw[0].split('');
-    if (raw.length !== n) fail(`Expected ${n} slot values, got ${raw.length}`, currentLine);
-    return raw.map(v => {
-      const q = alpha.find(x => same(x, /^-?\d+(?:\.\d+)?$/.test(v) ? +v : v.replace(/^"|"$/g, '')));
-      if (q === undefined) fail(`"${v}" is not in the slot alphabet`, currentLine);
-      return q;
-    });
-  };
-  const score = (guess, secret) => {
-    let exact = 0; const leftG = [], leftS = [];
-    for (let i = 0; i < d.n; i++) if (same(guess[i], secret[i])) exact++; else { leftG.push(guess[i]); leftS.push(secret[i]); }
-    let misplaced = 0;
-    for (const v of leftG) { const j = leftS.findIndex(x => same(x, v)); if (j >= 0) { misplaced++; leftS.splice(j, 1); } }
-    return { exact, misplaced };
-  };
-  let pool = candidates, lastGuess = null, currentLine = d.x.n;
-  const rows = [`<div class="stats-bar"><div class="stat-chip"><span class="stat-val">${candidates.length.toLocaleString()}</span><span class="stat-lbl">Start</span></div></div>`];
-  const addStep = (x, text) => rows.push(`<div class="step animate-in" data-line="${x.n}"><div class="step-head"><span class="step-n">${rows.length}</span><code class="step-clue">${esc(x.t)}</code><span class="step-count">${pool.length.toLocaleString()} left</span></div><div class="chips"><span class="chip">${esc(text)}</span></div></div>`);
-  const filter = (pred, x, text) => { pool = pool.filter(pred); addStep(x, text); if (!pool.length) fail(`Contradiction: no slot arrangement satisfies this line`, x.n); };
-  const parseFeedback = text => {
-    const clean = text.replace(/,/g, ' ').trim();
-    if (/^none$/i.test(clean)) return { exact: 0, misplaced: 0 };
-    const compact = clean.match(/^(?:(\d+)(?:\s*)e)?(?:(\d+)(?:\s*)n)?(?:(\d+)(?:\s*)x)?$/i);
-    if (compact && compact[0]) {
-      const exact = compact[1] == null ? 0 : +compact[1];
-      const misplaced = compact[2] == null ? 0 : +compact[2];
-      const none = compact[3] == null ? d.n - exact - misplaced : +compact[3];
-      if (exact + misplaced + none > d.n) fail('Feedback counts exceed slot count', currentLine);
-      return { exact, misplaced };
-    }
-    const parts = [...clean.matchAll(/(\d+)\s*(exact|correct|e|misplaced|present|near|n|yellow)/ig)];
-    if (!parts.length) fail('Feedback needs counts such as "1 exact, 2 near" or "1e2n"', currentLine);
-    let exact = 0, misplaced = 0;
-    for (const part of parts) {
-      const value = +part[1], word = part[2].toLowerCase();
-      if (/^(exact|correct|e)$/.test(word)) exact = value;
-      else misplaced = value;
-    }
-    if (exact + misplaced > d.n) fail('Feedback counts exceed slot count', currentLine);
-    return { exact, misplaced };
-  };
-  for (const x of L) {
-    currentLine = x.n;
-    if (x === d.x || /^(SETUP|START|SOLVE|THRESHOLD|LISTMAX)\b/i.test(x.t)) continue;
-    let m;
-    if ((m = x.t.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+(.+?)\s*:=\s*(.+)$/i))) {
-      const lhs = m[1].trim(), guessText = m[2].trim();
-      if (lhs.toLowerCase() !== d.name.toLowerCase()) fail(`Unknown slots category "${lhs}"`, x.n);
-      if (/^slot(?:\d+|\(\d+\)|\[\d+\])$/i.test(guessText)) {
-        fail('A guess must contain slot values, not a slot reference', x.n);
-      } else {
-        const feedback = m[3].trim();
-        lastGuess = parseCode(guessText, d.n);
-        const scoreTarget = parseFeedback(feedback);
-        filter(s => {
-          const scoreValue = score(lastGuess, s);
-          return scoreValue.exact === scoreTarget.exact && scoreValue.misplaced === scoreTarget.misplaced;
-        }, x, `Guess ${fmtCode(lastGuess)}: ${scoreTarget.exact} exact, ${scoreTarget.misplaced} near`);
-      }
-      continue;
-    }
-    if ((m = x.t.match(/^(?:GUESS\s+)?(.+?)\s*:=\s*(.+)$/i))) {
-      const lhs = m[1].trim(), rhs = m[2].trim();
-      if (/^slot(?:\d+|\(\d+\)|\[\d+\])$/i.test(lhs)) {
-        const q = lhs.match(/\d+/)[0] - 1; if (q < 0 || q >= d.n) fail(`Slot reference "${lhs}" is out of range`, x.n);
-        const v = parseCode(rhs, 1)[0]; filter(s => same(s[q], v), x, `${lhs} = ${v}`);
-      } else { lastGuess = parseCode(lhs, d.n); addStep(x, `Guess ${fmtCode(lastGuess)} recorded`); }
-      continue;
-    }
-    if ((m = x.t.match(/^GUESS\s+(.+)$/i))) { lastGuess = parseCode(m[1], d.n); addStep(x, `Guess ${fmtCode(lastGuess)} recorded`); continue; }
-    if ((m = x.t.match(/^FEEDBACK\s+(.+)$/i))) {
-      if (!lastGuess) fail('FEEDBACK needs a preceding GUESS or := line', x.n);
-      const nums = [...m[1].matchAll(/(\d+)\s*(exact|correct|green|misplaced|present|yellow)|\b(exact|correct|green|misplaced|present|yellow)\s*(\d+)/ig)];
-      if (!nums.length) fail('Feedback needs counts such as "1 exact, 2 misplaced"', x.n);
-      let ex, mis; for (const z of nums) { const word = z[2] || z[3], val = +(z[1] || z[4]); if (/exact|correct|green/i.test(word)) ex = val; else mis = val; }
-      if (ex == null) ex = 0; if (mis == null) mis = 0;
-      if (ex < 0 || mis < 0 || ex + mis > d.n) fail('Feedback counts exceed slot count', x.n);
-      filter(s => { const z = score(lastGuess, s); return z.exact === ex && z.misplaced === mis; }, x, `Feedback: ${ex} exact, ${mis} misplaced`);
-      continue;
-    }
-    if ((m = x.t.match(/^has\s+(.+)$/i))) { const v = parseCode(m[1], 1)[0]; filter(s => s.some(q => same(q, v)), x, `Has ${v}`); continue; }
-    if ((m = x.t.match(/^lacks?\s+(.+)$/i))) { const v = parseCode(m[1], 1)[0]; filter(s => !s.some(q => same(q, v)), x, `Lacks ${v}`); continue; }
-    if ((m = x.t.match(/^(even|odd)\s+(slot(?:\d+|\(\d+\)|\[\d+\]))$/i))) {
-      const q = +m[2].match(/\d+/)[0] - 1; if (q < 0 || q >= d.n) fail(`Slot reference "${m[2]}" is out of range`, x.n);
-      filter(s => typeof s[q] === 'number' && (Math.abs(s[q]) % 2 === (m[1].toLowerCase() === 'odd' ? 1 : 0)), x, `${m[1]} ${m[2]}`); continue;
-    }
-    if ((m = x.t.match(/^(?:formula\s+)?(slot(?:\d+|\(\d+\)|\[\d+\]))\s*([+\-*\/])\s*(slot(?:\d+|\(\d+\)|\[\d+\])|-?\d+(?:\.\d+)?)\s*(=|!=|<|>|<=|>=)\s*(-?\d+(?:\.\d+)?)$/i))) {
-      const q = +m[1].match(/\d+/)[0] - 1, q2 = /^slot/i.test(m[3]) ? +m[3].match(/\d+/)[0] - 1 : -1;
-      if (q < 0 || q >= d.n || q2 >= d.n) fail(`Slot reference is out of range`, x.n);
-      const op = m[4], rhs = +m[5], ok = (v => op === '=' ? Math.abs(v - rhs) < 1e-9 : op === '!=' ? Math.abs(v - rhs) >= 1e-9 : op === '<' ? v < rhs : op === '>' ? v > rhs : op === '<=' ? v <= rhs + 1e-9 : v >= rhs - 1e-9);
-      const apply = (a, b) => m[2] === '+' ? a + b : m[2] === '-' ? a - b : m[2] === '*' ? a * b : b === 0 ? NaN : a / b;
-      filter(s => typeof s[q] === 'number' && (q2 < 0 ? ok(apply(s[q], +m[3])) : typeof s[q2] === 'number' && ok(apply(s[q], s[q2]))), x, `Formula ${m[1]} ${m[2]} ${m[3]} ${op} ${rhs}`); continue;
-    }
-    fail('Unsupported slots line; use :=, GUESS, FEEDBACK, has, lacks, even, odd, or formula', x.n);
-  }
-  rows.push(`<div class="stats-bar stats-final"><div class="stat-chip green"><span class="stat-val">${pool.length.toLocaleString()}</span><span class="stat-lbl">Remaining</span></div></div>`);
-  if (pool.length && pool.length <= lm) {
-    const head = Array.from({ length: d.n }, (_, i) => `<th scope="col"><span class="ch-in"><span class="ch-name">Slot ${i + 1}</span></span></th>`).join('');
-    const body = pool.map((code, row) => `<tr><th scope="row">${row + 1}</th>${code.map(value => `<td><span class="slot-cell">${esc(value)}</span></td>`).join('')}</tr>`).join('');
-    rows.push(`<div class="answer slot-answer"><div class="answer-head"><span class="answer-title${pool.length === 1 ? '' : ' part'}">${pool.length === 1 ? 'Solution' : 'Remaining candidates'}</span><span class="answer-hint">${pool.length === 1 ? 'Each column is one slot' : `${pool.length} possible codes`}</span></div><div class="answer-scroll"><table class="grid slot-grid"><thead><tr><th scope="col">#</th>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`);
-  }
-  if (!pool.length) return true;
-  rows.push(`<div class="solved-banner">${pool.length <= thr ? 'Slot solution found' : `${pool.length.toLocaleString()} slot arrangements remain`}</div>`);
-  out.innerHTML = rows.join('');
-  $('badge').textContent = pool.length.toLocaleString() + ' left';
-  return true;
-}
-
-// kind: 0 exact · 1 beyond exact precision · 2 lower bound (search budget ran out) · 3 estimate
-const fmt = (n, kind = 0) => {
-  const big = n >= 1e15, s = kind === 0 && !big ? n.toLocaleString() : n < 1e9 ? Math.round(+n.toPrecision(3)).toLocaleString() : n.toExponential(2).replace('e+', '×10^');
-  return (kind === 2 ? '≥ ' : kind ? '≈ ' : big ? '≈ ' : '') + s;
-};
-
-/* ───────── plain-language tooltip: only while hovering a clue AND holding Shift ───────── */
-let TIPS = [];
-let hoverStep = null, shiftDown = false, lastPt = { clientX: 0, clientY: 0 }, curTip = -1;
-const tipEl = document.createElement('div');
-tipEl.className = 'tip';
-tipEl.setAttribute('role', 'tooltip');
-tipEl.hidden = true;
-document.body.appendChild(tipEl);
-const placeTip = pt => {
-  const pad = 16, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
-  let x = pt.clientX + pad, y = pt.clientY + pad;
-  if (x + w > innerWidth - 8) x = Math.max(8, pt.clientX - w - pad);
-  if (y + h > innerHeight - 8) y = Math.max(8, pt.clientY - h - pad);
-  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
-};
-const hideTip = () => { tipEl.hidden = true; curTip = -1; };
-const syncTip = () => {
-  const i = hoverStep && shiftDown ? +hoverStep.dataset.tip : -1;
-  if (!(i >= 0) || !TIPS[i]) return hideTip();
-  if (curTip !== i) {
-    tipEl.innerHTML = `<div class="tip-h"><span class="tip-n">Clue ${i + 1}</span><span class="tip-k">in plain words</span></div><div class="tip-b">${esc(TIPS[i])}</div>`;
-    curTip = i;
-  }
-  tipEl.hidden = false; placeTip(lastPt);
-};
-const setTags = (t, l) => { $('tagThr').textContent = 'THRESHOLD ' + t; $('tagList').textContent = 'LISTMAX ' + l; };
-
-function runRepeating(L, out) {
-  const decl = /^(\w+)\s+(repeat|unique)\s+(.+)$/i;
-  let mode = 0, row = null, columns = [], clues = [];
-  for (const x of L) {
-    const u = x.t.toUpperCase();
-    if (u === 'SETUP') { mode = 1; continue; }
-    if (u === 'START') { mode = 2; continue; }
-    if (u === 'SOLVE') break;
-    if (mode === 1) {
-      const m = x.t.match(decl), values = x.t.match(/"[^"]*"|\S+/g) || [];
-      if (m) columns.push({ name: m[1], unique: m[2].toLowerCase() === 'unique', values: m[3].split(/\s+/) });
-      else if (values.length > 1) row = { name: values.shift(), values };
-    } else if (mode === 2) clues.push(x);
-  }
-  if (!columns.length) return false;
-  if (!row) throw new E('Repeating/unique mode needs a plain row category', 1);
-  const R = row.values.length, states = [];
-  const build = (columnIndex, state) => {
-    if (columnIndex === columns.length) { states.push(state.map(values => values.slice())); return; }
-    const column = columns[columnIndex], values = [];
-    const fill = () => {
-      if (values.length === R) { build(columnIndex + 1, state.concat([values])); return; }
-      for (let i = 0; i < column.values.length; i++) {
-        if (!column.unique || !values.includes(i)) { values.push(i); fill(); values.pop(); }
-      }
-    };
-    fill();
-  };
-  build(0, []);
-  const valueIndex = (column, value) => column.values.findIndex(v => v.toLowerCase() === value.toLowerCase());
-  const filter = predicate => states.splice(0, states.length, ...states.filter(predicate));
-  const columnAt = name => columns.findIndex(c => c.name.toLowerCase() === name.toLowerCase());
-  const rowIndex = token => {
-    const m = token.match(/^(\d+)[a-z]+$/i);
-    return m ? +m[1] - 1 : -1;
-  };
-  const cell = (state, column, index) => state[column][index];
-  for (const x of clues) {
-    let m = x.t.match(/^(\w+)\[(\d+)\]\s*(!?=)\s*(.+)$/);
-    if (m) {
-      const c = columnAt(m[1]), index = +m[2] - 1, value = valueIndex(columns[c], m[4].trim());
-      if (c < 0 || index < 0 || index >= R || value < 0) throw new E('Unknown indexed value', x.n);
-      filter(s => m[3] === '=' ? cell(s, c, index) === value : cell(s, c, index) !== value);
-      continue;
-    }
-    m = x.t.match(/^(\d+[a-z]+)\s*=\s*(\w+)$/);
-    if (m) {
-      const index = rowIndex(m[1]), value = m[2];
-      if (index < 0 || index >= R) throw new E('Row reference is out of range', x.n);
-      const matches = columns.map((column, c) => [c, valueIndex(column, value)]).filter(([, i]) => i >= 0);
-      if (matches.length !== 1) throw new E('Value must resolve to exactly one repeating column', x.n);
-      filter(s => cell(s, matches[0][0], index) === matches[0][1]);
-      continue;
-    }
-    m = x.t.match(/^(\w+)\s+has\s+(\w+)(?:\s+x(\d+))?$/i);
-    if (m) {
-      const c = columnAt(m[1]), value = valueIndex(columns[c], m[2]), count = +(m[3] || 1);
-      if (c < 0 || value < 0) throw new E('Unknown column or value', x.n);
-      filter(s => s[c].filter(v => v === value).length >= count);
-      continue;
-    }
-    m = x.t.match(/^(\w+)\s+lacks\s+(\w+)$/i);
-    if (m) {
-      const c = columnAt(m[1]), value = valueIndex(columns[c], m[2]);
-      if (c < 0 || value < 0) throw new E('Unknown column or value', x.n);
-      filter(s => !s[c].includes(value));
-      continue;
-    }
-    m = x.t.match(/^(\w+)\s+first$/i);
-    if (m) {
-      const matches = columns.map((column, c) => [c, valueIndex(column, m[1])]).filter(([, i]) => i >= 0);
-      if (matches.length !== 1) throw new E('Unknown value', x.n);
-      filter(s => s[matches[0][0]][0] === matches[0][1]);
-      continue;
-    }
-    m = x.t.match(/^(not\s+)?(\w+)\s+before\s+(\w+)$/i);
-    if (m) {
-      const left = columns.map((column, c) => [c, valueIndex(column, m[2])]).filter(([, i]) => i >= 0);
-      const right = columns.map((column, c) => [c, valueIndex(column, m[3])]).filter(([, i]) => i >= 0);
-      if (left.length !== 1 || right.length !== 1) throw new E('Unknown value', x.n);
-      filter(s => {
-        const found = s[left[0][0]].some((v, i) => v === left[0][1] && s[right[0][0]].some((w, j) => w === right[0][1] && i < j));
-        return m[1] ? !found : found;
-      });
-      continue;
-    }
-    if (/^distinct\s+/i.test(x.t)) {
-      const names = x.t.replace(/^distinct\s+/i, '').split(/\s+/).map(columnAt);
-      if (names.some(i => i < 0)) throw new E('Unknown column in distinct clause', x.n);
-      filter(s => {
-        const seen = new Set();
-        for (let r = 0; r < R; r++) {
-          const key = names.map(c => s[c][r]).join(',');
-          if (seen.has(key)) return false;
-          seen.add(key);
-        }
-        return true;
-      });
-      continue;
-    }
-    throw new E('Unsupported repeating-mode clue', x.n);
-  }
-  const rows = states.map((state, n) => `<tr><th scope="row">${n + 1}</th>${state.map((column, c) => `<td><span class="slot-cell">${esc(column.map(i => columns[c].values[i]).join(', '))}</span></td>`).join('')}</tr>`).join('');
-  out.innerHTML = `<div class="answer slot-answer"><div class="answer-head"><span class="answer-title">Remaining candidates</span></div><div class="answer-scroll"><table class="grid slot-grid"><thead><tr><th>#</th>${columns.map(c => `<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
-  $('badge').textContent = states.length + ' left';
-  return true;
-}
-
 /* ───────── answer table ───────── */
 // ord.o = category indexes; o[0] is the row category, the rest are columns in display order.
 const ORD_KEY = 'gridsolver.order';
@@ -1157,7 +870,7 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
     const txt = $('src').value, raw = txt.split('\n');
     if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
-    if (L.some(x=>/^\w+\s+(?:repeat|unique)\s+/i.test(x.t)) && runRepeating(L,out)) return;
+    if (L.some(x=>/^\w+\s+(?:repeat|unique)\s+/i.test(x.t)) && GSSolvers.runRepeating(L,out)) return;
     // A slots declaration switches to the additive Mastermind/slots engine.
     // Detect it before the SETUP/START parser so ordinary grid programs remain
     // byte-for-byte compatible with their previous path.
@@ -1168,7 +881,7 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
         if (q) { if (q[1].toUpperCase() === 'THRESHOLD') thr = Math.max(1, +q[2]); else lm = +q[2]; }
       }
       setTags(thr, lm);
-      runSlots(L, out, thr, lm);
+      GSSolvers.runSlots(L, out, thr, lm);
       return;
     }
     let mode = 0, setup = [], clues = [], done = false, defaultUnit = null;

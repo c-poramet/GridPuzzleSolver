@@ -270,7 +270,9 @@ is no build step or dependency.
 | `index.html` | Page structure and solver output |
 | `styles.css` | Dark theme and layout |
 | `editor.js` | Highlighting, autocomplete, diagnostics, fixes, Normalize |
-| `solver.js` | Parsing, propagation, solving, answer table |
+| `solvers/slots.js` | Mastermind/slots parsing, filtering, and result rendering |
+| `solvers/columns.js` | Repeating/unique column enumeration and clue filtering |
+| `solver.js` | Legacy parsing, propagation, solving, and mode coordination |
 | `Clue_to_GSL_PROMPT.md` | Prompt for translating grid and supported slots clues |
 | `README.md` | This guide |
 
