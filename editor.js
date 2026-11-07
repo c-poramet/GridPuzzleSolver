@@ -131,7 +131,7 @@ function initSettings() {
 }
 
 /* ───────── language data ───────── */
-const SECTION = ['SETUP', 'START', 'SOLVE'];
+const SECTION = ['SETUP', 'START', 'GUARDS', 'RULES', 'STATEMENTS', 'SOLVE'];
 const SETTINGS = ['THRESHOLD', 'LISTMAX', 'DEFAULT UNIT', 'UNIT', 'ROWS'];
 const GATES = ['and', 'or', 'xor', 'nand', 'nor', 'xnor'];
 const GATES2 = ['before', 'after', 'right', 'then', 'then+', 'after+', 'beside', 'adj', 'between', 'apart', 'within', 'first', 'last', 'at', 'opposite', 'in'];
@@ -182,12 +182,18 @@ function analyze(text) {
   const lines = raw.map(() => ({ kind: 'blank', mode: 0, toks: [], issues: [] }));
   const cats = [];
   const master = { declarations: [], guesses: [] };
+  const guardProgram = raw.some(l => /^\s*GUARDS\s*$/i.test(stripC(l).trim()));
   let mode = 0;
 
   // pass 1: sections + categories
   raw.forEach((l, i) => {
     const code = stripC(l).trim(), u = code.toUpperCase(), L = lines[i];
     if (!code) { L.mode = mode; return; }
+    if (guardProgram) {
+      L.mode = 2;
+      L.kind = /^(GUARDS|RULES|START|STATEMENTS|SOLVE)$/i.test(u) ? 'sec' : 'guard';
+      return;
+    }
     if (mode === 3) { L.kind = 'ignored'; L.mode = 3; return; }
     if (u === 'SETUP') { mode = 1; L.kind = 'sec'; L.mode = 1; return; }
     if (u === 'START') { mode = 2; L.kind = 'sec'; L.mode = 2; return; }
@@ -256,6 +262,15 @@ function analyze(text) {
       case 'blank': tk(L, 0, code, ''); break;
       case 'ignored': tk(L, 0, code, 't-dim'); break;
       case 'sec': tk(L, 0, lead, ''); tk(L, lead.length, core, 't-sec'); tk(L, lead.length + core.length, trail, ''); break;
+      case 'guard': {
+        tk(L, 0, lead, '');
+        const words = /\S+/g; let q;
+        while ((q = words.exec(core))) {
+          const w = q[0], at = lead.length + q.index;
+          tk(L, at, w, /^(guards?|days?|rules?|start|statements|day|when|says?|on|and|or|xor|not|lies?|lying|truth|truthful|random|true|false)$/i.test(w) ? 't-kw' : 't-ent');
+        }
+        break;
+      }
       case 'stray': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Begin with SETUP', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'catbad': tk(L, 0, lead, ''); bad(L, lead.length, core, 'Expected: name [tag] items…', 't-id'); tk(L, lead.length + core.length, trail, ''); break;
       case 'set': {

@@ -85,6 +85,10 @@ function run() { // only ever called by the Update button, Ctrl+Enter, Example a
     const txt = $('src').value, raw = txt.split('\n');
     if (!txt.trim()) { out.innerHTML = PH; $('badge').textContent = '— left'; setTags(DEF_THR, DEF_LM); return; }
     raw.forEach((l, i) => { l = l.replace(/\/\/.*$/, '').trim(); if (l) L.push({ t: l, n: i + 1 }); });
+    if (L.some(x => /^GUARDS$/i.test(x.t))) {
+      for (const x of L) { const q = x.t.match(/^(THRESHOLD|LISTMAX)\s*=\s*(\d+)$/i); if (q) { if (q[1].toUpperCase() === 'THRESHOLD') thr = Math.max(1, +q[2]); else lm = +q[2]; } }
+      setTags(thr, lm); GSSolvers.runGuards(L, out, thr, lm); return;
+    }
     const setupLines = L.slice(0, L.findIndex(x => /^START$/i.test(x.t)) < 0 ? L.length : L.findIndex(x => /^START$/i.test(x.t)))
       .filter(x => !/^(?:SETUP|ROWS|THRESHOLD|LISTMAX)\b/i.test(x.t));
     const unequalSetup = setupLines.length > 1 && !setupLines.some(x => /\.\.+/.test(x.t))

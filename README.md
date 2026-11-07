@@ -299,6 +299,38 @@ The editor recognizes the repeating/unique vocabulary, pool aliases, `ROWS`,
 are executed by the row-column engine; ordinary legacy categories continue to
 use the legacy grid engine.
 
+### Guard statements
+
+Guard mode solves truth-teller, liar, and random-speaker puzzles, including
+unknown speakers:
+
+```
+GUARDS
+guards Twindledum Twindledee
+days Sunday Monday Tuesday Wednesday Thursday Friday Saturday
+RULES
+Twindledum lies on Monday Tuesday Wednesday
+Twindledee lies on Thursday Friday Saturday
+Twindledum tells the truth on Sunday
+Twindledee tells the truth on Sunday
+START
+DAY Sunday
+UNKNOWN says I am lying today or I am Twindledee
+SOLVE
+```
+
+`guards` and `days` declare names and ordered positions. Rules use `lies`,
+`truth`/`tells the truth`, or `random`, followed by one or more day names. A
+rule may instead use `left`, `right`, or a numeric position; guards default to
+truth-telling when no rule matches. `DAY` selects the condition for following
+statements, and `Monday: Guard says ...` is a short form.
+
+Statements support `TRUE`, `FALSE`, `not`, `and`, `or`, `xor`, `I am Guard`,
+`I am lying today`, `I tell the truth today`, `I am random`, and `I am left` /
+`I am right`. A random guard places no truth-value restriction on that
+statement. The answer table lists each remaining identity with its mode and
+position.
+
 #### Slots output
 
 Slots results use the same answer-table treatment as grid results. Each

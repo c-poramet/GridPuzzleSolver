@@ -9,7 +9,7 @@
  */
 const fs = require('fs');
 const vm = require('vm');
-const files = ['core/runtime.js', 'solvers/legacy.js', 'solvers/slots.js', 'solvers/columns.js', 'renderers/answer-table.js', 'solver.js', 'editor.js'];
+const files = ['core/runtime.js', 'solvers/legacy.js', 'solvers/slots.js', 'solvers/columns.js', 'solvers/guards.js', 'renderers/answer-table.js', 'solver.js', 'editor.js'];
 for (const file of files) {
   const source = fs.readFileSync(require('path').join(__dirname, '..', file), 'utf8');
   new vm.Script(source, { filename: file });
